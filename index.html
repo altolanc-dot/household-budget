@@ -222,13 +222,15 @@
         <button class="ghost" style="color:var(--expense);border-color:var(--expense);" onclick="deleteCurrentCardData()">이 카드의 저장된 내용 완전 삭제</button>
       </div>
     </div>
-    <div class="panel" id="cardResultPanel" style="display:none;">
-      <h2>③ 분류 결과 — 항목을 클릭해서 지정하세요 (미분류는 반영되지 않습니다)</h2>
-      <p class="status" style="margin:0 0 6px;">카드별 반영 합계 (이번 달 기준, 누락 확인용 — 클릭하면 상세내역이 보입니다)</p>
+    <div class="panel" id="cardBrandSummaryPanel">
+      <h2>카드별 반영 합계 (이번 달 기준, 누락 확인용 — 클릭하면 그 카드로 전환하고 상세내역을 보여줍니다)</h2>
       <div id="cardBrandTotals" class="cards" style="margin-bottom:8px;"></div>
-      <div id="cardBrandDetailPanel" style="display:none;margin-bottom:14px;">
+      <div id="cardBrandDetailPanel" style="display:none;">
         <table><thead><tr><th>가맹점</th><th>금액</th><th>분류</th><th></th></tr></thead><tbody id="cardBrandDetailBody"></tbody></table>
       </div>
+    </div>
+    <div class="panel" id="cardResultPanel" style="display:none;">
+      <h2>③ 분류 결과 — 항목을 클릭해서 지정하세요 (미분류는 반영되지 않습니다)</h2>
       <p class="status">"입력중복"을 누르면 그 거래는 사용처 카테고리에 넣지 않고, 선택한 카드의 "카드값" 항목에서 금액만큼 차감합니다 (이미 카드값에 총액으로 입력해둔 경우 중복 방지용).</p>
       <p class="status" id="cardResultSummary"></p>
       <div id="cardQuickSummary" class="cards" style="margin-bottom:6px;"></div>
@@ -535,7 +537,7 @@ async function init(){
 }
 
 // 카드 선택 버튼 처리 — 브랜드는 기록용 라벨일 뿐, 차감 대상은 항상 통합된 "카드값" 항목 하나
-let cardBrandList = ["우리","현대","기타"];
+let cardBrandList = ["우리","현대"];
 
 function renderCardBrandButtons(){
   const wrap = document.getElementById('cardBrandButtons');
@@ -799,7 +801,13 @@ async function loadConfig(){
 
     const brandSnap = await db.collection('config').doc('cardBrands').get();
     if(brandSnap.exists && Array.isArray(brandSnap.data().list) && brandSnap.data().list.length>0){
-      cardBrandList = brandSnap.data().list;
+      let loadedBrands = brandSnap.data().list;
+      // "기타"는 카드추가 기능으로 대체되어 기본 목록에서 제외 (사용자가 직접 추가한 경우가 아니라면)
+      if(loadedBrands.includes('기타') && loadedBrands.length<=3){
+        loadedBrands = loadedBrands.filter(b=>b!=='기타');
+        await db.collection('config').doc('cardBrands').set({ list: loadedBrands });
+      }
+      cardBrandList = loadedBrands;
     } else {
       await db.collection('config').doc('cardBrands').set({ list: cardBrandList });
     }
@@ -1417,60 +1425,54 @@ function renderCardQuickSummary(){
     `;
   }
 
-  // 카드별 합계 (이번 달 실제 반영된 거래 기준) — 맨 위, 클릭하면 상세내역 표시
+  // 카드별 합계는 별도 함수(renderCardBrandSummary)에서 항상 갱신됨 (분류 결과가 없어도 보여야 하므로)
+}
+
+// 카드별 반영 합계 카드 — 항상 표시되는 별도 패널. 클릭하면 그 카드로 전환 + 상세내역 표시.
+function renderCardBrandSummary(){
   const brandWrap = document.getElementById('cardBrandTotals');
-  if(brandWrap){
-    const txList = currentMonthData.cardTransactions || [];
-    brandWrap.innerHTML = cardBrandList.map(brand=>{
-      const brandTx = txList.filter(tx=>tx.cardBrand===brand);
-      const brandTotal = brandTx.reduce((s,tx)=>s+Number(tx.amount||0),0);
-      const isActive = cardBrandDetailFilter===brand;
-      return `<div class="card" style="cursor:pointer;${isActive?'background:var(--navy);border-color:var(--navy);':''}" onclick="toggleCardBrandDetail('${brand}')">
-        <div class="label" style="${isActive?'color:#dfe3ea;':''}">${brand}카드 반영 합계</div>
-        <div class="value" style="font-size:14px;${isActive?'color:#fff;':''}">${fmt(brandTotal)}</div>
-        <div class="delta" style="${isActive?'color:#c8cede;':''}">${brandTx.length}건 · 클릭해서 상세보기</div>
-      </div>`;
-    }).join('');
-  }
+  if(!brandWrap) return;
+  const txList = currentMonthData.cardTransactions || [];
+  brandWrap.innerHTML = cardBrandList.map(brand=>{
+    const brandTx = txList.filter(tx=>tx.cardBrand===brand);
+    const brandTotal = brandTx.reduce((s,tx)=>s+Number(tx.amount||0),0);
+    const isActive = selectedCardBrand===brand;
+    return `<div class="card" style="cursor:pointer;${isActive?'background:var(--navy);border-color:var(--navy);':''}" onclick="selectCardBrand('${brand}')">
+      <div class="label" style="${isActive?'color:#dfe3ea;':''}">${brand}카드 반영 합계</div>
+      <div class="value" style="font-size:14px;${isActive?'color:#fff;':''}">${fmt(brandTotal)}</div>
+      <div class="delta" style="${isActive?'color:#c8cede;':''}">${brandTx.length}건 · 클릭해서 이 카드로 전환+상세보기</div>
+    </div>`;
+  }).join('');
   renderCardBrandDetail();
 }
 
-let cardBrandDetailFilter = null;
 function toggleCardBrandDetail(brand){
-  cardBrandDetailFilter = (cardBrandDetailFilter === brand) ? null : brand;
-  renderCardQuickSummary();
+  // 하위 호환용: 이제는 selectCardBrand로 통합되어 동일하게 동작
+  selectCardBrand(brand);
 }
 
 function renderCardBrandDetail(){
   const panel = document.getElementById('cardBrandDetailPanel');
   const body = document.getElementById('cardBrandDetailBody');
   if(!panel || !body) return;
-  if(!cardBrandDetailFilter){ panel.style.display = 'none'; return; }
+  if(!selectedCardBrand){ panel.style.display = 'none'; return; }
   panel.style.display = 'block';
-  const txList = (currentMonthData.cardTransactions||[]).filter(tx=>tx.cardBrand===cardBrandDetailFilter);
+  const txList = (currentMonthData.cardTransactions||[]).filter(tx=>tx.cardBrand===selectedCardBrand);
   if(txList.length===0){
-    body.innerHTML = `<tr><td colspan="4" class="empty">${cardBrandDetailFilter}카드로 반영된 내역이 없습니다</td></tr>`;
+    body.innerHTML = `<tr><td colspan="4" class="empty">${selectedCardBrand}카드로 반영된 내역이 없습니다</td></tr>`;
     return;
   }
   const reclassifyOptions = QUICK_LABELS.concat(['중복']);
   body.innerHTML = txList.map(tx=>{
-    let label;
-    if(tx.isDuplicate){
-      const found = findItemById(tx.itemId);
-      label = `입력중복 (${found ? found.item.name : '카드값'}에서 차감)`;
-    } else {
-      const found = findItemById(tx.itemId);
-      label = found ? `${found.cat.name} - ${found.item.name}(${found.item.person})` : '(삭제된 항목)';
-    }
     const currentLabel = tx.isDuplicate ? '중복' : quickLabelForItemId(tx.itemId);
+    const hint = tx.isDuplicate ? ` <span class="status" style="margin:0;">(카드값에서 차감됨)</span>` : '';
     const selectHtml = `<select class="mini-select" onchange="reclassifyCardTransaction('${tx.id}', this.value)">
-      <option value="">-- 분류 변경 --</option>
       ${reclassifyOptions.map(l=>`<option value="${l}" ${l===currentLabel?'selected':''}>${l==='중복'?'입력중복':l}</option>`).join('')}
-    </select>`;
+    </select>${hint}`;
     return `<tr>
       <td>${tx.merchant}</td>
       <td>${fmt(tx.amount)}</td>
-      <td>${label}<br>${selectHtml}</td>
+      <td>${selectHtml}</td>
       <td><span class="del-x" onclick="removeCardTransaction('${tx.id}')">✕</span></td>
     </tr>`;
   }).join('');
@@ -1683,6 +1685,7 @@ function quickLabelForItemId(itemId){
 function renderCardHistory(){
   const wrap = document.getElementById('cardHistoryPanel');
   if(!wrap) return;
+  renderCardBrandSummary();
   const allList = currentMonthData.cardTransactions || [];
   const list = selectedCardBrand ? allList.filter(tx=>tx.cardBrand===selectedCardBrand) : allList;
   const tbody = document.getElementById('cardHistoryBody');
@@ -1694,34 +1697,23 @@ function renderCardHistory(){
   }
   const reclassifyOptions = QUICK_LABELS.concat(['중복']);
   tbody.innerHTML = list.map(tx=>{
-    let label;
-    if(tx.isDuplicate){
-      const found = findItemById(tx.itemId);
-      label = `입력중복 (${found ? found.item.name : '카드값'}에서 차감)`;
-    } else {
-      const found = findItemById(tx.itemId);
-      label = found ? `${found.cat.name} - ${found.item.name}(${found.item.person})` : '(삭제된 항목)';
-    }
     const currentLabel = tx.isDuplicate ? '중복' : quickLabelForItemId(tx.itemId);
+    const hint = tx.isDuplicate ? ` <span class="status" style="margin:0;">(카드값에서 차감됨)</span>` : '';
     const selectHtml = `<select class="mini-select" onchange="reclassifyCardTransaction('${tx.id}', this.value)">
-      <option value="">-- 분류 변경 --</option>
       ${reclassifyOptions.map(l=>`<option value="${l}" ${l===currentLabel?'selected':''}>${l==='중복'?'입력중복':l}</option>`).join('')}
-    </select>`;
+    </select>${hint}`;
     return `<tr>
       <td>${tx.merchant}</td>
       <td>${fmt(tx.amount)}</td>
-      <td>${label}<br>${selectHtml}</td>
+      <td>${selectHtml}</td>
       <td><span class="del-x" onclick="removeCardTransaction('${tx.id}')">✕</span></td>
     </tr>`;
   }).join('');
 }
 
 // 이미 반영된 카드 내역의 분류를 되돌리거나 다른 분류로 바꿈
-async function reclassifyCardTransaction(txId, newLabel){
-  if(!newLabel) return;
-  const list = currentMonthData.cardTransactions || [];
-  const tx = list.find(t=>t.id===txId);
-  if(!tx) return;
+// 거래 하나의 재분류 효과(기존 되돌리기+새 분류 적용)를 실제로 적용. 성공하면 true 반환.
+function applyReclassifyToTx(tx, newLabel){
   const cardValueItemId = findCardValueItemId();
 
   // 기존 효과 되돌리기
@@ -1729,7 +1721,6 @@ async function reclassifyCardTransaction(txId, newLabel){
     if(tx.itemId) currentMonthData.expenses[tx.itemId] = Number(currentMonthData.expenses[tx.itemId]||0) + tx.amount;
   } else {
     currentMonthData.expenses[tx.itemId] = Math.max(0, Number(currentMonthData.expenses[tx.itemId]||0) - tx.amount);
-    // 일반 분류였다면 카드값에서도 차감됐던 것이므로 되돌려서 복원
     if(cardValueItemId && tx.itemId !== cardValueItemId){
       currentMonthData.expenses[cardValueItemId] = Number(currentMonthData.expenses[cardValueItemId]||0) + tx.amount;
     }
@@ -1737,13 +1728,8 @@ async function reclassifyCardTransaction(txId, newLabel){
 
   // 새 분류 적용
   if(newLabel === '중복'){
-    if(cardValueItemId){
-      currentMonthData.expenses[cardValueItemId] = Math.max(0, Number(currentMonthData.expenses[cardValueItemId]||0) - tx.amount);
-      tx.itemId = cardValueItemId;
-      tx.isDuplicate = true;
-    } else {
-      alert('"카드값" 항목을 찾지 못해 입력중복 처리를 할 수 없습니다.');
-      // 원래 상태로 복구
+    if(!cardValueItemId){
+      // 되돌릴 수 없으므로 원래 상태로 복구
       if(tx.isDuplicate){
         currentMonthData.expenses[tx.itemId] = Math.max(0, Number(currentMonthData.expenses[tx.itemId]||0) - tx.amount);
       } else {
@@ -1752,9 +1738,11 @@ async function reclassifyCardTransaction(txId, newLabel){
           currentMonthData.expenses[cardValueItemId] = Math.max(0, Number(currentMonthData.expenses[cardValueItemId]||0) - tx.amount);
         }
       }
-      renderCardHistory();
-      return;
+      return false;
     }
+    currentMonthData.expenses[cardValueItemId] = Math.max(0, Number(currentMonthData.expenses[cardValueItemId]||0) - tx.amount);
+    tx.itemId = cardValueItemId;
+    tx.isDuplicate = true;
   } else {
     const newItemId = resolveQuickTargetItemId(newLabel);
     currentMonthData.expenses[newItemId] = Number(currentMonthData.expenses[newItemId]||0) + tx.amount;
@@ -1763,12 +1751,53 @@ async function reclassifyCardTransaction(txId, newLabel){
     }
     tx.itemId = newItemId;
     tx.isDuplicate = false;
-    await saveConfig();
   }
+  return true;
+}
+
+// 거래 하나를 재분류하면, 이번 달 안에서 같은 가맹점명을 가진 다른 거래들도 함께 같은 분류로 맞추고,
+// 앞으로도 자동 분류되도록 규칙으로 저장한다.
+async function reclassifyCardTransaction(txId, newLabel){
+  if(!newLabel) return;
+  const list = currentMonthData.cardTransactions || [];
+  const tx = list.find(t=>t.id===txId);
+  if(!tx) return;
+
+  const ok = applyReclassifyToTx(tx, newLabel);
+  if(!ok){
+    alert('"카드값" 항목을 찾지 못해 입력중복 처리를 할 수 없습니다.');
+    renderCardHistory();
+    return;
+  }
+
+  // 같은 가맹점명을 가진 다른 거래들도 함께 맞춰줌
+  let matchedCount = 1;
+  list.forEach(other=>{
+    if(other === tx || other.merchant !== tx.merchant) return;
+    const otherCurrentLabel = other.isDuplicate ? '중복' : quickLabelForItemId(other.itemId);
+    if(otherCurrentLabel === newLabel) return; // 이미 같은 분류면 건드리지 않음
+    if(applyReclassifyToTx(other, newLabel)) matchedCount++;
+  });
+
+  // 앞으로도 이 가맹점은 자동으로 이 분류로 인식되도록 규칙 저장
+  if(newLabel !== '중복'){
+    merchantRules[tx.merchant] = newLabel;
+    await saveRules();
+    renderRuleTable();
+  }
+  await saveConfig();
 
   await saveMonth(currentMonthKey);
   renderCategoryEditor();
   renderCardHistory();
+  renderCardBrandDetail();
+  if(matchedCount > 1){
+    const statusHint = document.getElementById('cardHistoryTitle');
+    if(statusHint){
+      const original = statusHint.textContent;
+      statusHint.textContent = `${original} — 같은 가맹점 ${matchedCount}건을 "${newLabel==='중복'?'입력중복':newLabel}"(으)로 함께 맞췄습니다.`;
+    }
+  }
 }
 
 function removeCardTransaction(txId){
