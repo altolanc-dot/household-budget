@@ -198,9 +198,8 @@
 
       <div class="row-flex" style="margin-bottom:12px;">
         <span style="font-size:12px;color:var(--sub);font-weight:700;">① 카드 선택</span>
-        <button type="button" class="card-brand-btn" data-card="우리" onclick="selectCardBrand('우리')">우리카드</button>
-        <button type="button" class="card-brand-btn" data-card="현대" onclick="selectCardBrand('현대')">현대카드</button>
-        <button type="button" class="card-brand-btn" data-card="기타" onclick="selectCardBrand('기타')">기타카드</button>
+        <div id="cardBrandButtons" class="row-flex" style="gap:8px;"></div>
+        <button type="button" class="ghost" style="padding:6px 14px;font-size:12px;" onclick="addCardBrand()">+ 카드 추가</button>
         <span class="status" id="cardBrandHint" style="margin:0;"></span>
       </div>
 
@@ -501,10 +500,38 @@ async function init(){
   await loadAnnual();
   renderSettingsEditor();
   renderRuleTable();
+  renderCardBrandButtons();
   switchTab('monthly');
 }
 
-// 카드 선택(우리/현대/기타) 버튼 처리 — 브랜드는 기록용 라벨일 뿐, 차감 대상은 항상 통합된 "카드값" 항목 하나
+// 카드 선택 버튼 처리 — 브랜드는 기록용 라벨일 뿐, 차감 대상은 항상 통합된 "카드값" 항목 하나
+let cardBrandList = ["우리","현대","기타"];
+
+function renderCardBrandButtons(){
+  const wrap = document.getElementById('cardBrandButtons');
+  if(!wrap) return;
+  wrap.innerHTML = cardBrandList.map(brand=>
+    `<button type="button" class="card-brand-btn ${brand===selectedCardBrand?'active':''}" data-card="${brand}" onclick="selectCardBrand('${brand}')">${brand}카드</button>`
+  ).join('');
+}
+
+async function saveCardBrandList(){
+  if(!firebaseReady) return;
+  try{ await db.collection('config').doc('cardBrands').set({ list: cardBrandList }); }
+  catch(e){ console.error(e); }
+}
+
+function addCardBrand(){
+  const name = prompt('추가할 카드 이름을 입력하세요 (예: 삼성, 롯데, 국민)');
+  if(!name) return;
+  const trimmed = name.trim();
+  if(!trimmed) return;
+  if(cardBrandList.includes(trimmed)){ alert('이미 있는 카드입니다.'); return; }
+  cardBrandList.push(trimmed);
+  saveCardBrandList();
+  renderCardBrandButtons();
+}
+
 function selectCardBrand(brand){
   selectedCardBrand = brand;
   document.querySelectorAll('.card-brand-btn').forEach(b=> b.classList.toggle('active', b.dataset.card===brand));
@@ -512,7 +539,7 @@ function selectCardBrand(brand){
   const hint = document.getElementById('cardBrandHint');
   if(hint){
     hint.textContent = itemId
-      ? `→ "${findItemById(itemId).cat.name} - ${findItemById(itemId).item.name}" 항목에서 입력중복 처리 시 차감됩니다.`
+      ? `→ "${findItemById(itemId).cat.name} - ${findItemById(itemId).item.name}" 항목에서 입력중복 처리 시 차감됩니다. (다른 카드로 반영해도 기존 분류 금액은 그대로 유지되고 합산됩니다)`
       : `※ "카드값" 항목을 찾지 못했습니다. 설정 탭에서 항목명을 확인해주세요.`;
   }
 }
@@ -658,6 +685,13 @@ async function loadConfig(){
     } else {
       merchantRules = Object.assign({}, DEFAULT_RULES);
       await db.collection('config').doc('merchantRules').set({rules: merchantRules});
+    }
+
+    const brandSnap = await db.collection('config').doc('cardBrands').get();
+    if(brandSnap.exists && Array.isArray(brandSnap.data().list) && brandSnap.data().list.length>0){
+      cardBrandList = brandSnap.data().list;
+    } else {
+      await db.collection('config').doc('cardBrands').set({ list: cardBrandList });
     }
   }catch(e){ console.error('설정 로드 실패', e); }
 }
