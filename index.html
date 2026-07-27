@@ -588,6 +588,7 @@ async function selectCardBrand(brand){
     selectedCardBrand = brand;
   }
   renderCardBrandButtons();
+  renderCardHistory();
   const itemId = findCardValueItemId();
   const hint = document.getElementById('cardBrandHint');
   if(hint){
