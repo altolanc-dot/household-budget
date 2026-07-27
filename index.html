@@ -6,6 +6,7 @@
 <title>household-budget</title>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <style>
   :root{
@@ -104,6 +105,13 @@
   .mini-select{padding:4px 6px;font-size:12px;}
   .status{font-size:12px;color:var(--sub);margin-top:8px;}
   .empty{color:var(--sub);font-size:13px;padding:20px;text-align:center;}
+  .dropzone{
+    border:2px dashed var(--line);border-radius:10px;padding:22px;text-align:center;
+    color:var(--sub);font-size:13px;font-weight:600;cursor:pointer;background:#fbfbfd;
+    transition:border-color .15s, background .15s;margin-bottom:8px;
+  }
+  .dropzone:hover{border-color:var(--accent);background:var(--accent-light);}
+  .dropzone.drag-active{border-color:var(--accent);background:var(--accent-light);color:var(--accent);}
   canvas{max-width:100%;}
   .fixed-warn{background:#fff8e6;border:1px solid #ffe4a3;color:#8a6100;padding:10px 12px;border-radius:8px;font-size:12px;margin-bottom:14px;}
   .del-x{color:var(--sub);cursor:pointer;font-size:16px;padding:0 4px;}
@@ -161,10 +169,17 @@
   <!-- ===== CARD TAB ===== -->
   <div id="tab-card" style="display:none;">
     <div class="panel">
-      <h2>카드 이용내역 붙여넣기</h2>
+      <h2>카드 이용내역 붙여넣기 또는 PDF 업로드</h2>
       <p class="status">형식: 한 줄에 <b>날짜, 가맹점명, 금액</b> (쉼표/탭/공백 구분 모두 인식). 예시: <code>06/12, 스타벅스 목동점, 5400</code></p>
       <p class="status">※ 주거비 외(고정비) 항목은 카드 자동분류 대상에서 제외됩니다. 변동비 카테고리로만 반영돼요.</p>
-      <textarea id="cardPaste" placeholder="여기에 카드 명세서 내용을 붙여넣으세요"></textarea>
+
+      <div id="pdfDropzone" class="dropzone" onclick="document.getElementById('pdfFileInput').click()">
+        <span id="dropzoneText">📄 카드 명세서 PDF를 여기로 드래그하거나 클릭해서 업로드하세요</span>
+        <input type="file" id="pdfFileInput" accept="application/pdf" style="display:none;" onchange="handlePdfFileInput(event)">
+      </div>
+      <p class="status" id="pdfStatus"></p>
+
+      <textarea id="cardPaste" placeholder="여기에 카드 명세서 내용을 붙여넣으세요 (또는 위에서 PDF를 업로드하면 자동으로 채워집니다)"></textarea>
       <div class="row-flex" style="margin-top:10px;">
         <button onclick="parseCardStatement()">분석하기</button>
         <button class="ghost" onclick="document.getElementById('cardPaste').value=''">지우기</button>
@@ -644,6 +659,74 @@ function renderIncomeTable(){
 }
 
 /* ---------------- 카드 명세서 파싱 (변동비 카테고리만 대상) ---------------- */
+/* ---------------- PDF 카드 명세서 업로드/추출 ---------------- */
+if(window.pdfjsLib){
+  pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+}
+
+async function extractTextFromPdf(file){
+  const buf = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({data: buf}).promise;
+  let lines = [];
+  for(let p=1; p<=pdf.numPages; p++){
+    const page = await pdf.getPage(p);
+    const content = await page.getTextContent();
+    // y좌표 기준으로 같은 줄 항목을 묶어서 재구성
+    const rows = {};
+    content.items.forEach(item=>{
+      const y = Math.round(item.transform[5]);
+      if(!rows[y]) rows[y] = [];
+      rows[y].push({x: item.transform[4], text: item.str});
+    });
+    const sortedY = Object.keys(rows).map(Number).sort((a,b)=>b-a);
+    sortedY.forEach(y=>{
+      const rowItems = rows[y].sort((a,b)=>a.x-b.x);
+      const lineText = rowItems.map(r=>r.text).join(' ').replace(/\s+/g,' ').trim();
+      if(lineText) lines.push(lineText);
+    });
+  }
+  return lines.join('\n');
+}
+
+async function handlePdfFile(file){
+  const statusEl = document.getElementById('pdfStatus');
+  if(!file || file.type !== 'application/pdf'){
+    statusEl.textContent = 'PDF 파일만 업로드할 수 있습니다.';
+    return;
+  }
+  statusEl.textContent = 'PDF에서 텍스트를 읽는 중...';
+  try{
+    const text = await extractTextFromPdf(file);
+    const textarea = document.getElementById('cardPaste');
+    textarea.value = text;
+    statusEl.textContent = `PDF 텍스트 추출 완료 (${text.split('\n').filter(l=>l.trim()).length}줄). 자동 분석을 실행합니다. 표 형식에 따라 인식이 완벽하지 않을 수 있으니 아래 붙여넣기 내용을 확인해주세요.`;
+    parseCardStatement();
+  }catch(e){
+    console.error(e);
+    statusEl.textContent = 'PDF 분석 중 오류가 발생했습니다. 스캔본(이미지) PDF는 지원하지 않으며, 텍스트가 포함된 PDF만 가능합니다.';
+  }
+}
+
+function handlePdfFileInput(e){
+  const file = e.target.files[0];
+  if(file) handlePdfFile(file);
+}
+
+(function setupDropzone(){
+  const zone = document.getElementById('pdfDropzone');
+  if(!zone) return;
+  ['dragenter','dragover'].forEach(evt=>{
+    zone.addEventListener(evt, (e)=>{ e.preventDefault(); e.stopPropagation(); zone.classList.add('drag-active'); });
+  });
+  ['dragleave','drop'].forEach(evt=>{
+    zone.addEventListener(evt, (e)=>{ e.preventDefault(); e.stopPropagation(); zone.classList.remove('drag-active'); });
+  });
+  zone.addEventListener('drop', (e)=>{
+    const file = e.dataTransfer.files && e.dataTransfer.files[0];
+    if(file) handlePdfFile(file);
+  });
+})();
+
 let parsedRows = [];
 function parseCardStatement(){
   const raw = document.getElementById('cardPaste').value.trim();
