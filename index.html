@@ -34,7 +34,11 @@
   button.secondary{background:#fff;color:var(--accent);border:1px solid var(--accent);box-shadow:none;}
   button.ghost{background:transparent;color:var(--sub);border:1px solid var(--line);font-weight:500;box-shadow:none;}
   button:disabled{opacity:.5;cursor:not-allowed;}
-  .tabs{display:flex;gap:10px;margin-bottom:18px;flex-wrap:wrap;}
+  .tabs{
+    display:flex;gap:10px;margin-bottom:18px;flex-wrap:wrap;
+    position:sticky;top:0;z-index:40;background:var(--bg);
+    padding:10px 0 12px;border-bottom:1px solid var(--line);
+  }
   .tab{
     display:flex;align-items:center;justify-content:center;text-align:center;
     padding:12px 20px;min-height:20px;min-width:130px;
@@ -861,7 +865,7 @@ async function extractTextFromPdf(file){
     const page = await pdf.getPage(p);
     const content = await page.getTextContent();
     // y좌표가 비슷한 항목끼리 묶어서 같은 줄로 재구성 (완전히 같은 값이 아니어도 허용 오차 내면 병합)
-    const items = content.items.map(it=>({ x: it.transform[4], y: it.transform[5], text: it.str }))
+    const items = content.items.map(it=>({ x: it.transform[4], y: it.transform[5], text: it.str, width: it.width || 0 }))
       .filter(it=> it.text && it.text.trim().length>0)
       .sort((a,b)=> b.y - a.y || a.x - b.x);
     const rows = [];
@@ -873,7 +877,20 @@ async function extractTextFromPdf(file){
     });
     rows.forEach(row=>{
       row.items.sort((a,b)=>a.x-b.x);
-      const lineText = row.items.map(r=>r.text).join(' ').replace(/\s+/g,' ').trim();
+      // 글자/단어 사이에 실제 벌어진 간격이 있을 때만 공백을 넣어줌 (아니면 낱글자마다 공백이 생기는 문제 방지)
+      let lineText = '';
+      let lastEnd = null;
+      row.items.forEach(it=>{
+        if(lastEnd !== null){
+          const gap = it.x - lastEnd;
+          const avgCharW = it.text.length ? (it.width / it.text.length) : it.width;
+          const threshold = Math.max(1, avgCharW * 0.4);
+          if(gap > threshold) lineText += ' ';
+        }
+        lineText += it.text;
+        lastEnd = it.x + it.width;
+      });
+      lineText = lineText.replace(/\s+/g,' ').trim();
       if(lineText) lines.push(lineText);
     });
   }
@@ -946,6 +963,7 @@ function parseCardStatement(){
   // PDF에서 추출한 텍스트: "가맹점명 ... 금액" 줄 + 바로 다음 줄(또는 다다음 줄)의
   // "본인/가족 카드명 날짜 시간 결제방식" 에서 날짜만 뽑아 짝지어 처리
   const DATE_RE = /(\d{1,4})\s*[.\/]\s*(\d{1,2})\s*[.\/]\s*(\d{1,2})/;
+  const TIME_RE = /\d{1,2}\s*:\s*\d{2}/;
   for(let i=0; i<rawLines.length; i++){
     const line = rawLines[i];
     const amountMatch = line.match(/([\d,]{3,})\s*원?\s*$/);
@@ -959,13 +977,18 @@ function parseCardStatement(){
     const inlineDate = merchant.match(new RegExp('^'+DATE_RE.source));
     if(inlineDate){ date = inlineDate[0].replace(/\s+/g,''); merchant = merchant.slice(inlineDate[0].length).trim(); }
 
-    // 날짜가 없으면 바로 다음 1~2줄에서 날짜 패턴 탐색 (카드 명세서의 2번째 줄 구조)
+    // 날짜가 없으면 바로 다음 몇 줄에서 날짜 패턴 탐색 (카드 명세서의 2번째 줄 구조, 줄바꿈이 더 잘게 쪼개질 수 있어 범위를 넉넉히 둠)
     if(!date){
-      for(let look=1; look<=2 && i+look<rawLines.length; look++){
+      for(let look=1; look<=4 && i+look<rawLines.length; look++){
         const nextLine = rawLines[i+look];
         if(/[\d,]{3,}\s*원\s*$/.test(nextLine)) break; // 다음 거래로 넘어갔으면 중단
         const m = nextLine.match(DATE_RE);
-        if(m){ date = m[0].replace(/\s+/g,''); break; }
+        if(m){
+          date = m[0].replace(/\s+/g,'');
+          const tm = nextLine.match(TIME_RE);
+          if(tm) date += ' ' + tm[0].replace(/\s+/g,'');
+          break;
+        }
       }
     }
 
@@ -1031,15 +1054,17 @@ function renderCardResults(){
     const tagHtml = row.actionLabel
       ? (row.actionLabel==='중복' ? `<span class="tag" style="background:#fff2e0;color:var(--warn);">입력중복</span>` : `<span class="tag matched">${row.actionLabel}</span>`)
       : `<span class="tag unclassified">미분류</span>`;
-    const btns = QUICK_LABELS.map(label=>
+    const btns = ["외식비","생활비","의류비","의료비","교통비"].map(label=>
       `<button type="button" class="quick-btn ${row.actionLabel===label?'active':''}" onclick="setRowQuickAction(${idx},'${label}')">${label}</button>`
-    ).join('') + `<button type="button" class="quick-btn dup ${row.actionLabel==='중복'?'active':''}" onclick="setRowQuickAction(${idx},'중복')">입력중복</button>`;
+    ).join('');
+    const dupBtn = `<button type="button" class="quick-btn dup ${row.actionLabel==='중복'?'active':''}" onclick="setRowQuickAction(${idx},'중복')">입력중복</button>`;
+    const allBtns = dupBtn + btns;
     return `<tr>
       <td>${row.date}</td>
       <td>${row.merchant}</td>
       <td>${fmt(row.amount)}</td>
       <td>${tagHtml}</td>
-      <td><div class="quick-btn-group">${btns}</div></td>
+      <td><div class="quick-btn-group">${allBtns}</div></td>
     </tr>`;
   }).join('');
 }
