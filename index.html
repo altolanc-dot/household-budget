@@ -230,11 +230,15 @@
         <tbody id="cardResultBody"></tbody>
       </table>
       <div class="row-flex" style="margin-top:12px;">
-        <button onclick="confirmCardImport()">이번 달에 반영하기</button>
+        <button id="confirmImportBtn" onclick="confirmCardImport()">이번 달에 반영하기</button>
+        <span class="status" id="confirmImportStatus" style="margin:0;"></span>
       </div>
     </div>
     <div class="panel" id="cardHistoryPanel">
-      <h2 id="cardHistoryTitle">이번 달에 반영된 카드 내역</h2>
+      <div class="row-flex" style="justify-content:space-between;">
+        <h2 id="cardHistoryTitle" style="margin:0;">이번 달에 반영된 카드 내역</h2>
+        <button class="ghost" style="color:var(--expense);border-color:var(--expense);" onclick="undoAllCardTransactions()">반영 취소하기</button>
+      </div>
       <table><thead><tr><th>날짜</th><th>가맹점</th><th>금액</th><th>분류</th><th></th></tr></thead><tbody id="cardHistoryBody"></tbody></table>
     </div>
   </div>
@@ -521,19 +525,24 @@ function consolidateQuickCategories(){
     changed = true;
   }
 
-  // 1) 독립 카테고리 흡수
+  // 1) 독립 카테고리 흡수 (첫 항목의 id를 그대로 재사용해서 기존 카드 내역 연결이 끊기지 않게 함)
   ["교통비","의료비","의류비","외식비"].forEach(standaloneName=>{
     const idx = categories.findIndex(c=>c.name===standaloneName);
     if(idx === -1) return;
     const cat = categories[idx];
+    if(cat.items.length === 0){ categories.splice(idx,1); changed = true; return; }
     const targetItemName = QUICK_TARGET_MAP[standaloneName].itemName;
-    let existing = lifeCat.items.find(it=>it.name===targetItemName);
-    if(!existing){
-      existing = { id:genId('q'), name:targetItemName, person:'공통', amount:0 };
-      lifeCat.items.push(existing);
+    const primary = cat.items[0];
+    const extraSum = cat.items.slice(1).reduce((s,it)=>s+Number(it.amount||0),0);
+    primary.name = targetItemName;
+    primary.person = '공통';
+    primary.amount = Number(primary.amount||0) + extraSum;
+    const existing = lifeCat.items.find(it=>it.name===targetItemName);
+    if(existing){
+      existing.amount = Number(existing.amount||0) + Number(primary.amount||0);
+    } else {
+      lifeCat.items.push(primary);
     }
-    const sum = cat.items.reduce((s,it)=>s+Number(it.amount||0),0);
-    existing.amount = Number(existing.amount||0) + sum;
     categories.splice(idx,1);
     changed = true;
   });
@@ -651,6 +660,7 @@ async function loadMonth(key){
   if(!currentMonthData.expenses) currentMonthData.expenses = {};
   if(!currentMonthData.income) currentMonthData.income = [];
   if(!currentMonthData.cardTransactions) currentMonthData.cardTransactions = [];
+  const repaired = repairLegacyItemIds();
   allMonthsCache[key] = currentMonthData;
   document.getElementById('loadStatus').textContent = '';
   ['summaryDetail-monthly','summaryDetail-income'].forEach(id=>{
@@ -661,6 +671,38 @@ async function loadMonth(key){
   renderSummaryCards();
   renderIncomeTable();
   renderCardHistory();
+  if(repaired) saveMonth(key);
+}
+
+// 예전 버전에서 "외식비/의료비/교통비/의류비"가 독립 카테고리였을 때 쓰이던 항목 id(d1,d2,m1,m2,t1,c1)가
+// 지금은 사라져서 "(삭제된 항목)"으로 보이는 문제를 복구: 현재 "생활비" 하위의 같은 의미 항목으로 다시 연결해줌
+const LEGACY_ITEM_ID_TO_NAME = { d1:'외식비', d2:'외식비', m1:'의료비', m2:'의료비', t1:'교통비', c1:'의류비' };
+function repairLegacyItemIds(){
+  const lifeCat = categories.find(c=>c.name==='생활비');
+  if(!lifeCat) return false;
+  const remap = {};
+  Object.entries(LEGACY_ITEM_ID_TO_NAME).forEach(([legacyId, targetName])=>{
+    const item = lifeCat.items.find(it=>it.name===targetName);
+    if(item) remap[legacyId] = item.id;
+  });
+  let changed = false;
+
+  (currentMonthData.cardTransactions||[]).forEach(tx=>{
+    if(remap[tx.itemId]){ tx.itemId = remap[tx.itemId]; changed = true; }
+  });
+
+  if(currentMonthData.expenses){
+    Object.keys(remap).forEach(legacyId=>{
+      if(legacyId in currentMonthData.expenses){
+        const amt = Number(currentMonthData.expenses[legacyId]||0);
+        const newId = remap[legacyId];
+        currentMonthData.expenses[newId] = Number(currentMonthData.expenses[newId]||0) + amt;
+        delete currentMonthData.expenses[legacyId];
+        changed = true;
+      }
+    });
+  }
+  return changed;
 }
 
 async function saveMonth(key){
@@ -1017,6 +1059,7 @@ function parseCardStatement(){
   const rawLines = raw.split('\n').map(l=>l.trim()).filter(l=>l.length>0);
   parsedRows = [];
   showAllCardRows = true;
+  cardBatchCommitted = false;
 
   // 쉼표/탭으로 구분된 줄이 절반 이상이면 직접 붙여넣은 형식(날짜, 가맹점, 금액)으로 처리
   const csvLikeCount = rawLines.filter(l=>l.split(/[,\t]+/).map(p=>p.trim()).filter(p=>p).length>=3).length;
@@ -1096,6 +1139,7 @@ function matchMerchant(merchant){
 let cardSortField = null;
 let cardSortAsc = true;
 let showAllCardRows = true;
+let cardBatchCommitted = false; // 이번 분석 배치가 이미 "월별 입력"에 반영됐는지 여부 (반영 후에도 화면 형식 유지용)
 
 function sortCardRows(field){
   cardSortAsc = (cardSortField === field) ? !cardSortAsc : true;
@@ -1151,11 +1195,26 @@ function renderCardResults(){
   const unclassified = parsedRows.filter(r=>!r.actionLabel);
   const classifiedCount = parsedRows.length - unclassified.length;
   if(summaryEl){
+    const committedBadge = cardBatchCommitted
+      ? `<span class="tag matched" style="margin-left:8px;">월별 입력에 반영 완료</span>`
+      : '';
     summaryEl.innerHTML = `저장된 규칙으로 <b>${classifiedCount}건</b> 자동 분류됨, <b>${unclassified.length}건</b> 미분류
-      <button class="ghost" style="margin-left:8px;padding:3px 10px;font-size:12px;" onclick="toggleShowAllCardRows()">${showAllCardRows ? '미분류만 보기' : '전체 보기'}</button>`;
+      <button class="ghost" style="margin-left:8px;padding:3px 10px;font-size:12px;" onclick="toggleShowAllCardRows()">${showAllCardRows ? '미분류만 보기' : '전체 보기'}</button>${committedBadge}`;
   }
 
   renderCardQuickSummary();
+
+  const confirmBtn = document.getElementById('confirmImportBtn');
+  const confirmStatus = document.getElementById('confirmImportStatus');
+  if(confirmBtn){
+    confirmBtn.disabled = cardBatchCommitted;
+    confirmBtn.textContent = cardBatchCommitted ? '반영 완료됨' : '이번 달에 반영하기';
+  }
+  if(confirmStatus){
+    confirmStatus.textContent = cardBatchCommitted
+      ? '이 내용은 이미 월별 입력(생활비 하위 항목)에 반영되었습니다. 다시 반영하려면 새로 분석해주세요.'
+      : '';
+  }
 
   const rowsToShow = showAllCardRows ? parsedRows : unclassified;
   if(rowsToShow.length===0){
@@ -1168,10 +1227,11 @@ function renderCardResults(){
     const tagHtml = row.actionLabel
       ? (row.actionLabel==='중복' ? `<span class="tag" style="background:#fff2e0;color:var(--warn);">입력중복</span>` : `<span class="tag matched">${row.actionLabel}</span>`)
       : `<span class="tag unclassified">미분류</span>`;
+    const disabledAttr = cardBatchCommitted ? 'disabled' : '';
     const btns = ["외식비","생활비","의류비","의료비","교통비","기타"].map(label=>
-      `<button type="button" class="quick-btn ${row.actionLabel===label?'active':''}" onclick="setRowQuickAction(${idx},'${label}')">${label}</button>`
+      `<button type="button" ${disabledAttr} class="quick-btn ${row.actionLabel===label?'active':''}" onclick="setRowQuickAction(${idx},'${label}')">${label}</button>`
     ).join('');
-    const dupBtn = `<button type="button" class="quick-btn dup ${row.actionLabel==='중복'?'active':''}" onclick="setRowQuickAction(${idx},'중복')">입력중복</button>`;
+    const dupBtn = `<button type="button" ${disabledAttr} class="quick-btn dup ${row.actionLabel==='중복'?'active':''}" onclick="setRowQuickAction(${idx},'중복')">입력중복</button>`;
     const allBtns = dupBtn + btns;
     return `<tr>
       <td>${row.date}</td>
@@ -1184,6 +1244,7 @@ function renderCardResults(){
 }
 
 function setRowQuickAction(idx, label){
+  if(cardBatchCommitted) return; // 이미 반영된 배치는 이 화면에서 재분류 불가 (반영된 카드 내역 목록에서 재분류하세요)
   const merchant = parsedRows[idx].merchant;
   parsedRows[idx].actionLabel = label;
   if(label !== '중복'){
@@ -1200,6 +1261,7 @@ function setRowQuickAction(idx, label){
 }
 
 async function confirmCardImport(){
+  if(cardBatchCommitted) return; // 이미 반영된 배치는 중복 반영 방지
   let addedCount = 0;
   let dupCount = 0;
   let skippedDup = 0;
@@ -1247,9 +1309,10 @@ async function confirmCardImport(){
   renderCategoryEditor();
   renderRuleTable();
   renderCardHistory();
-  document.getElementById('cardPaste').value = '';
-  parsedRows = [];
-  document.getElementById('cardResultPanel').style.display='none';
+
+  // 화면 형식은 그대로 유지 (초기화/숨김하지 않음) — 반영 완료 상태로만 전환
+  cardBatchCommitted = true;
+  renderCardResults();
 
   let msg = `${addedCount}건이 ${currentMonthKey}의 "월별 입력 → 생활비" 항목에 반영되었습니다.\n`;
   const breakdownLines = Object.keys(breakdown).map(label=>`  · ${label}: ${fmt(breakdown[label])}`).join('\n');
@@ -1365,6 +1428,24 @@ function removeCardTransaction(txId){
   }
   list.splice(idx,1);
   saveMonth(currentMonthKey);
+  renderCategoryEditor();
+  renderCardHistory();
+}
+
+// 이번 달에 반영된 카드 내역을 전체 되돌리기 (금액도 원상복구)
+async function undoAllCardTransactions(){
+  const list = currentMonthData.cardTransactions || [];
+  if(list.length === 0){ alert('되돌릴 카드 내역이 없습니다.'); return; }
+  if(!confirm(`${currentMonthKey}에 반영된 카드 내역 ${list.length}건을 모두 되돌리시겠습니까? 각 항목에 더해졌던 금액이 전부 원상복구됩니다.`)) return;
+  list.forEach(tx=>{
+    if(tx.isDuplicate){
+      if(tx.itemId) currentMonthData.expenses[tx.itemId] = Number(currentMonthData.expenses[tx.itemId]||0) + tx.amount;
+    } else {
+      currentMonthData.expenses[tx.itemId] = Math.max(0, Number(currentMonthData.expenses[tx.itemId]||0) - tx.amount);
+    }
+  });
+  currentMonthData.cardTransactions = [];
+  await saveMonth(currentMonthKey);
   renderCategoryEditor();
   renderCardHistory();
 }
