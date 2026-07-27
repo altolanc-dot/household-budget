@@ -223,11 +223,11 @@
       </div>
     </div>
     <div class="panel" id="cardBrandSummaryPanel">
-      <h2>카드별 반영 합계 (이번 달 기준, 누락 확인용 — 클릭하면 그 카드로 전환하고 상세내역을 보여줍니다)</h2>
-      <div id="cardBrandTotals" class="cards" style="margin-bottom:8px;"></div>
-      <div id="cardBrandDetailPanel" style="display:none;">
-        <table><thead><tr><th>가맹점</th><th>금액</th><th>분류</th><th></th></tr></thead><tbody id="cardBrandDetailBody"></tbody></table>
+      <div class="row-flex" style="justify-content:space-between;">
+        <h2 style="margin:0;">카드별 반영 합계 (이번 달 기준, 누락 확인용 — 클릭하면 그 카드로 전환됩니다)</h2>
+        <button class="ghost" style="color:var(--expense);border-color:var(--expense);" onclick="undoAllCardTransactions()">반영 취소하기</button>
       </div>
+      <div id="cardBrandTotals" class="cards" style="margin:8px 0;"></div>
     </div>
     <div class="panel" id="cardResultPanel" style="display:none;">
       <h2>③ 분류 결과 — 항목을 클릭해서 지정하세요 (미분류는 반영되지 않습니다)</h2>
@@ -247,13 +247,6 @@
         <tbody id="cardResultBody"></tbody>
       </table>
       <p class="status" id="confirmImportStatus"></p>
-    </div>
-    <div class="panel" id="cardHistoryPanel">
-      <div class="row-flex" style="justify-content:space-between;">
-        <h2 id="cardHistoryTitle" style="margin:0;">이번 달에 반영된 카드 내역</h2>
-        <button class="ghost" style="color:var(--expense);border-color:var(--expense);" onclick="undoAllCardTransactions()">반영 취소하기</button>
-      </div>
-      <table><thead><tr><th>가맹점</th><th>금액</th><th>분류</th><th></th></tr></thead><tbody id="cardHistoryBody"></tbody></table>
     </div>
   </div>
 
@@ -417,16 +410,15 @@ const DEFAULT_CATEGORIES = [
 ];
 
 // 카드 자동분류 큰 카테고리(퀵버튼) 라벨과, 각 라벨이 매핑되는 카테고리명/우선 항목명
-// → 전부 "생활비" 카테고리 하위 항목으로 통합 (카드값 하나에 생활비/외식비/의료비/의류비/교통비/여가비/기타로 세분화하는 개념)
-const QUICK_LABELS = ["교통비","생활비","의료비","의류비","외식비","여가비","기타"];
+// → 전부 "생활비" 카테고리 하위 항목으로 통합 (카드값 하나에 생활비/외식비/의료비/의류비/교통비/여가비로 세분화하는 개념)
+const QUICK_LABELS = ["교통비","생활비","의료비","의류비","외식비","여가비"];
 const QUICK_TARGET_MAP = {
   "교통비": { cat:"생활비", itemName:"교통비" },
   "생활비": { cat:"생활비", itemName:"마트/편의점" },
   "의료비": { cat:"생활비", itemName:"의료비" },
   "의류비": { cat:"생활비", itemName:"의류비" },
   "외식비": { cat:"생활비", itemName:"외식비" },
-  "여가비": { cat:"생활비", itemName:"여가비" },
-  "기타":   { cat:"생활비", itemName:"기타(카드)" }
+  "여가비": { cat:"생활비", itemName:"여가비" }
 };
 
 // 가맹점 키워드 → 퀵분류 라벨 매핑 (카드 명세서 자동분류용)
@@ -790,10 +782,18 @@ async function loadConfig(){
 
     const rsnap = await db.collection('config').doc('merchantRules').get();
     const loadedRules = rsnap.exists ? rsnap.data().rules : null;
-    const rulesValid = loadedRules && typeof loadedRules === 'object' &&
-      Object.values(loadedRules).every(v => typeof v === 'string' && QUICK_LABELS.includes(v));
-    if(rulesValid){
-      merchantRules = loadedRules;
+    if(loadedRules && typeof loadedRules === 'object'){
+      // 유효하지 않은 항목(예: 없어진 "기타" 라벨)만 걸러내고 나머지는 그대로 유지
+      const filtered = {};
+      let removedAny = false;
+      Object.entries(loadedRules).forEach(([k,v])=>{
+        if(typeof v === 'string' && QUICK_LABELS.includes(v)) filtered[k] = v;
+        else removedAny = true;
+      });
+      merchantRules = filtered;
+      if(removedAny || Object.keys(filtered).length===0){
+        await db.collection('config').doc('merchantRules').set({rules: merchantRules});
+      }
     } else {
       merchantRules = Object.assign({}, DEFAULT_RULES);
       await db.collection('config').doc('merchantRules').set({rules: merchantRules});
@@ -1389,7 +1389,7 @@ function onCardMerchantSearchInput(value){
 function renderCardQuickSummary(){
   const wrap = document.getElementById('cardQuickSummary');
   if(!wrap) return;
-  const labelsForSummary = ["외식비","생활비","의류비","의료비","교통비","여가비","기타","중복"];
+  const labelsForSummary = ["외식비","생활비","의류비","의료비","교통비","여가비","중복"];
   const totals = {};
   labelsForSummary.forEach(l=> totals[l] = {count:0, amount:0});
   parsedRows.forEach(r=>{
@@ -1436,7 +1436,7 @@ function renderCardQuickSummary(){
   // 카드별 합계는 별도 함수(renderCardBrandSummary)에서 항상 갱신됨 (분류 결과가 없어도 보여야 하므로)
 }
 
-// 카드별 반영 합계 카드 — 항상 표시되는 별도 패널. 클릭하면 그 카드로 전환 + 상세내역 표시.
+// 카드별 반영 합계 카드 — 항상 표시되는 별도 패널. 클릭하면 그 카드로 전환됨(상세는 아래 "③ 분류 결과"에서 함께 보임).
 function renderCardBrandSummary(){
   const brandWrap = document.getElementById('cardBrandTotals');
   if(!brandWrap) return;
@@ -1448,47 +1448,14 @@ function renderCardBrandSummary(){
     return `<div class="card" style="cursor:pointer;${isActive?'background:var(--navy);border-color:var(--navy);':''}" onclick="selectCardBrand('${brand}')">
       <div class="label" style="${isActive?'color:#dfe3ea;':''}">${brand}카드 반영 합계</div>
       <div class="value" style="font-size:14px;${isActive?'color:#fff;':''}">${fmt(brandTotal)}</div>
-      <div class="delta" style="${isActive?'color:#c8cede;':''}">${brandTx.length}건 · 클릭해서 이 카드로 전환+상세보기</div>
+      <div class="delta" style="${isActive?'color:#c8cede;':''}">${brandTx.length}건 · 클릭해서 이 카드로 전환</div>
     </div>`;
   }).join('');
-  renderCardBrandDetail();
 }
 
 function toggleCardBrandDetail(brand){
   // 하위 호환용: 이제는 selectCardBrand로 통합되어 동일하게 동작
   selectCardBrand(brand);
-}
-
-// 재분류용 버튼 그룹 HTML 생성 (분류결과 화면과 동일한 버튼 스타일)
-function reclassifyButtonsHtml(tx){
-  const currentLabel = tx.isDuplicate ? '중복' : quickLabelForItemId(tx.itemId);
-  const btns = ["외식비","생활비","의류비","의료비","교통비","여가비","기타"].map(label=>
-    `<button type="button" class="quick-btn ${currentLabel===label?'active':''}" onclick="reclassifyCardTransaction('${tx.id}','${label}')">${label}</button>`
-  ).join('');
-  const dupBtn = `<button type="button" class="quick-btn dup ${currentLabel==='중복'?'active':''}" onclick="reclassifyCardTransaction('${tx.id}','중복')">입력중복</button>`;
-  const hint = tx.isDuplicate ? `<div class="status" style="margin:2px 0 0;">카드값에서 차감됨</div>` : '';
-  return `<div class="quick-btn-group">${dupBtn}${btns}</div>${hint}`;
-}
-
-function renderCardBrandDetail(){
-  const panel = document.getElementById('cardBrandDetailPanel');
-  const body = document.getElementById('cardBrandDetailBody');
-  if(!panel || !body) return;
-  if(!selectedCardBrand){ panel.style.display = 'none'; return; }
-  panel.style.display = 'block';
-  const txList = (currentMonthData.cardTransactions||[]).filter(tx=>tx.cardBrand===selectedCardBrand);
-  if(txList.length===0){
-    body.innerHTML = `<tr><td colspan="4" class="empty">${selectedCardBrand}카드로 반영된 내역이 없습니다</td></tr>`;
-    return;
-  }
-  body.innerHTML = txList.map(tx=>{
-    return `<tr>
-      <td>${tx.merchant}</td>
-      <td>${fmt(tx.amount)}</td>
-      <td>${reclassifyButtonsHtml(tx)}</td>
-      <td><span class="del-x" onclick="removeCardTransaction('${tx.id}')">✕</span></td>
-    </tr>`;
-  }).join('');
 }
 
 function toggleCardLabelFilter(label){
@@ -1561,7 +1528,7 @@ function renderCardResults(){
     const tagHtml = row.actionLabel
       ? (row.actionLabel==='중복' ? `<span class="tag" style="background:#fff2e0;color:var(--warn);">입력중복</span>` : `<span class="tag matched">${row.actionLabel}</span>`)
       : `<span class="tag unclassified">미분류</span>`;
-    const btns = ["외식비","생활비","의류비","의료비","교통비","여가비","기타"].map(label=>
+    const btns = ["외식비","생활비","의류비","의료비","교통비","여가비"].map(label=>
       `<button type="button" class="quick-btn ${row.actionLabel===label?'active':''}" onclick="setRowQuickAction(${idx},'${label}')">${label}</button>`
     ).join('');
     const dupBtn = `<button type="button" class="quick-btn dup ${row.actionLabel==='중복'?'active':''}" onclick="setRowQuickAction(${idx},'중복')">입력중복</button>`;
@@ -1695,27 +1662,9 @@ function quickLabelForItemId(itemId){
   return null;
 }
 
+// 이번 달 카드별 반영 합계/상세보기를 갱신 (기존엔 별도의 "카드 내역" 패널도 있었으나 카드별 상세보기와 중복되어 통합함)
 function renderCardHistory(){
-  const wrap = document.getElementById('cardHistoryPanel');
-  if(!wrap) return;
   renderCardBrandSummary();
-  const allList = currentMonthData.cardTransactions || [];
-  const list = selectedCardBrand ? allList.filter(tx=>tx.cardBrand===selectedCardBrand) : allList;
-  const tbody = document.getElementById('cardHistoryBody');
-  const titleBrand = selectedCardBrand ? `${selectedCardBrand}카드 · ` : '';
-  document.getElementById('cardHistoryTitle').textContent = `${titleBrand}${currentMonthKey}에 반영된 카드 내역 (${list.length}건)`;
-  if(list.length===0){
-    tbody.innerHTML = `<tr><td colspan="4" class="empty">${selectedCardBrand ? `${selectedCardBrand}카드로 반영된 내역이 없습니다` : '이번 달에 반영된 카드 내역이 없습니다'}</td></tr>`;
-    return;
-  }
-  tbody.innerHTML = list.map(tx=>{
-    return `<tr>
-      <td>${tx.merchant}</td>
-      <td>${fmt(tx.amount)}</td>
-      <td>${reclassifyButtonsHtml(tx)}</td>
-      <td><span class="del-x" onclick="removeCardTransaction('${tx.id}')">✕</span></td>
-    </tr>`;
-  }).join('');
 }
 
 // 이미 반영된 카드 내역의 분류를 되돌리거나 다른 분류로 바꿈
@@ -1797,13 +1746,8 @@ async function reclassifyCardTransaction(txId, newLabel){
   await saveMonth(currentMonthKey);
   renderCategoryEditor();
   renderCardHistory();
-  renderCardBrandDetail();
   if(matchedCount > 1){
-    const statusHint = document.getElementById('cardHistoryTitle');
-    if(statusHint){
-      const original = statusHint.textContent;
-      statusHint.textContent = `${original} — 같은 가맹점 ${matchedCount}건을 "${newLabel==='중복'?'입력중복':newLabel}"(으)로 함께 맞췄습니다.`;
-    }
+    alert(`같은 가맹점 "${tx.merchant}" ${matchedCount}건을 "${newLabel==='중복'?'입력중복':newLabel}"(으)로 함께 맞췄습니다.`);
   }
 }
 
