@@ -405,20 +405,23 @@ const DEFAULT_CATEGORIES = [
       {id:"l8", name:"의료비", person:"공통", amount:0},
       {id:"l9", name:"의류비", person:"공통", amount:0},
       {id:"l10", name:"교통비", person:"공통", amount:0},
-      {id:"l11", name:"여가비", person:"공통", amount:0}
+      {id:"l11", name:"여가비", person:"공통", amount:0},
+      {id:"l12", name:"입력중복", person:"공통", amount:0}
   ]}
 ];
 
 // 카드 자동분류 큰 카테고리(퀵버튼) 라벨과, 각 라벨이 매핑되는 카테고리명/우선 항목명
-// → 전부 "생활비" 카테고리 하위 항목으로 통합 (카드값 하나에 생활비/외식비/의료비/의류비/교통비/여가비로 세분화하는 개념)
-const QUICK_LABELS = ["교통비","생활비","의료비","의류비","외식비","여가비"];
+// → 전부 "생활비" 카테고리 하위 항목으로 통합 (카드값 하나에 생활비/외식비/의료비/의류비/교통비/여가비/입력중복으로 세분화하는 개념)
+// "입력중복"도 실제 항목으로 관리되어, 그만큼 "카드값"에서는 자동으로 차감된다.
+const QUICK_LABELS = ["교통비","생활비","의료비","의류비","외식비","여가비","중복"];
 const QUICK_TARGET_MAP = {
   "교통비": { cat:"생활비", itemName:"교통비" },
   "생활비": { cat:"생활비", itemName:"마트/편의점" },
   "의료비": { cat:"생활비", itemName:"의료비" },
   "의류비": { cat:"생활비", itemName:"의류비" },
   "외식비": { cat:"생활비", itemName:"외식비" },
-  "여가비": { cat:"생활비", itemName:"여가비" }
+  "여가비": { cat:"생활비", itemName:"여가비" },
+  "중복":   { cat:"생활비", itemName:"입력중복" }
 };
 
 // 가맹점 키워드 → 퀵분류 라벨 매핑 (카드 명세서 자동분류용)
@@ -603,7 +606,7 @@ async function deleteCurrentCardData(){
   const remaining = [];
   txList.forEach(tx=>{
     if(tx.cardBrand !== selectedCardBrand){ remaining.push(tx); return; }
-    if(tx.isDuplicate){
+    if(tx.isDuplicate && tx.itemId === cardValueItemId){
       if(tx.itemId) currentMonthData.expenses[tx.itemId] = Number(currentMonthData.expenses[tx.itemId]||0) + tx.amount;
     } else {
       currentMonthData.expenses[tx.itemId] = Math.max(0, Number(currentMonthData.expenses[tx.itemId]||0) - tx.amount);
@@ -655,6 +658,22 @@ function findCardValueItemId(){
     if(it) return it.id;
   }
   return null;
+}
+
+// "카드값" 항목을 찾고, 없으면 "생활비" 카테고리 아래에 자동으로 새로 만들어서 반환 (입력중복 처리가 실패하지 않도록)
+async function ensureCardValueItemId(){
+  let id = findCardValueItemId();
+  if(id) return id;
+  let lifeCat = categories.find(c=>c.name==='생활비');
+  if(!lifeCat){
+    lifeCat = { name:'생활비', fixed:false, items:[] };
+    categories.push(lifeCat);
+  }
+  const newItem = { id: genId('q'), name:'카드값', person:'공통', amount:0 };
+  lifeCat.items.push(newItem);
+  await saveConfig();
+  renderCategoryEditor();
+  return newItem.id;
 }
 
 // 퀵분류 라벨(교통비/생활비/의료비/의류비/외식비/기타)에 대응하는 실제 항목 id를 찾거나 없으면 생성
@@ -1588,30 +1607,25 @@ async function setRowQuickAction(idx, label){
 async function commitSingleRow(row){
   if(row.txId || !row.actionLabel) return false;
   if(!currentMonthData.cardTransactions) currentMonthData.cardTransactions = [];
-  const cardValueItemId = findCardValueItemId();
 
-  if(row.actionLabel === '중복'){
-    if(!cardValueItemId){
-      alert(`"${row.merchant}" 처리 실패: "카드값" 항목을 찾지 못해 입력중복 처리를 할 수 없습니다.`);
-      row.actionLabel = '';
-      return false;
-    }
+  const cardValueItemId = findCardValueItemId();
+  const before = categories.some(c=>c.name===QUICK_TARGET_MAP[row.actionLabel]?.cat);
+  const itemId = resolveQuickTargetItemId(row.actionLabel);
+  if(!before) await saveConfig();
+
+  currentMonthData.expenses[itemId] = Number(currentMonthData.expenses[itemId]||0) + row.amount;
+  // 세부 항목(입력중복 포함)으로 분류된 만큼, 카드 총액("카드값")에서도 함께 차감해서 이중 계산 방지
+  if(cardValueItemId && itemId !== cardValueItemId){
     currentMonthData.expenses[cardValueItemId] = Math.max(0, Number(currentMonthData.expenses[cardValueItemId]||0) - row.amount);
-    const tx = { id: genId('tx'), date: row.date||'', merchant: row.merchant, amount: row.amount, itemId: cardValueItemId, isDuplicate: true, cardBrand: selectedCardBrand||null };
-    currentMonthData.cardTransactions.push(tx);
-    row.txId = tx.id;
-  } else {
-    const before = categories.some(c=>c.name===QUICK_TARGET_MAP[row.actionLabel]?.cat);
-    const itemId = resolveQuickTargetItemId(row.actionLabel);
-    if(!before) await saveConfig();
-    currentMonthData.expenses[itemId] = Number(currentMonthData.expenses[itemId]||0) + row.amount;
-    // 세부 항목으로 분류된 만큼, 카드 총액("카드값")에서도 함께 차감해서 이중 계산 방지
-    if(cardValueItemId && itemId !== cardValueItemId){
-      currentMonthData.expenses[cardValueItemId] = Math.max(0, Number(currentMonthData.expenses[cardValueItemId]||0) - row.amount);
-    }
-    const tx = { id: genId('tx'), date: row.date||'', merchant: row.merchant, amount: row.amount, itemId, cardBrand: selectedCardBrand||null };
-    currentMonthData.cardTransactions.push(tx);
-    row.txId = tx.id;
+  }
+
+  const isDup = row.actionLabel === '중복';
+  const tx = { id: genId('tx'), date: row.date||'', merchant: row.merchant, amount: row.amount, itemId, isDuplicate: isDup, cardBrand: selectedCardBrand||null };
+  currentMonthData.cardTransactions.push(tx);
+  row.txId = tx.id;
+
+  // 입력중복은 상황에 따라 매번 다를 수 있어 자동 규칙으로 저장하지 않음
+  if(!isDup){
     const shortKeyword = row.merchant;
     if(!merchantRules[shortKeyword]){
       merchantRules[shortKeyword] = row.actionLabel;
@@ -1619,6 +1633,7 @@ async function commitSingleRow(row){
       renderRuleTable();
     }
   }
+
   await saveMonth(currentMonthKey);
   renderCategoryEditor();
   renderCardHistory();
@@ -1669,11 +1684,12 @@ function renderCardHistory(){
 
 // 이미 반영된 카드 내역의 분류를 되돌리거나 다른 분류로 바꿈
 // 거래 하나의 재분류 효과(기존 되돌리기+새 분류 적용)를 실제로 적용. 성공하면 true 반환.
-function applyReclassifyToTx(tx, newLabel){
+async function applyReclassifyToTx(tx, newLabel){
   const cardValueItemId = findCardValueItemId();
 
   // 기존 효과 되돌리기
-  if(tx.isDuplicate){
+  // 구버전 호환: 예전엔 입력중복 거래의 itemId가 "카드값" 자신을 직접 가리켰음 (지금은 별도 "입력중복" 항목을 가리킴)
+  if(tx.isDuplicate && tx.itemId === cardValueItemId){
     if(tx.itemId) currentMonthData.expenses[tx.itemId] = Number(currentMonthData.expenses[tx.itemId]||0) + tx.amount;
   } else {
     currentMonthData.expenses[tx.itemId] = Math.max(0, Number(currentMonthData.expenses[tx.itemId]||0) - tx.amount);
@@ -1682,32 +1698,14 @@ function applyReclassifyToTx(tx, newLabel){
     }
   }
 
-  // 새 분류 적용
-  if(newLabel === '중복'){
-    if(!cardValueItemId){
-      // 되돌릴 수 없으므로 원래 상태로 복구
-      if(tx.isDuplicate){
-        currentMonthData.expenses[tx.itemId] = Math.max(0, Number(currentMonthData.expenses[tx.itemId]||0) - tx.amount);
-      } else {
-        currentMonthData.expenses[tx.itemId] = Number(currentMonthData.expenses[tx.itemId]||0) + tx.amount;
-        if(cardValueItemId && tx.itemId !== cardValueItemId){
-          currentMonthData.expenses[cardValueItemId] = Math.max(0, Number(currentMonthData.expenses[cardValueItemId]||0) - tx.amount);
-        }
-      }
-      return false;
-    }
+  // 새 분류 적용 (입력중복 포함, 전부 동일한 방식: 대상 항목에 더하고 카드값에서 차감)
+  const newItemId = resolveQuickTargetItemId(newLabel);
+  currentMonthData.expenses[newItemId] = Number(currentMonthData.expenses[newItemId]||0) + tx.amount;
+  if(cardValueItemId && newItemId !== cardValueItemId){
     currentMonthData.expenses[cardValueItemId] = Math.max(0, Number(currentMonthData.expenses[cardValueItemId]||0) - tx.amount);
-    tx.itemId = cardValueItemId;
-    tx.isDuplicate = true;
-  } else {
-    const newItemId = resolveQuickTargetItemId(newLabel);
-    currentMonthData.expenses[newItemId] = Number(currentMonthData.expenses[newItemId]||0) + tx.amount;
-    if(cardValueItemId && newItemId !== cardValueItemId){
-      currentMonthData.expenses[cardValueItemId] = Math.max(0, Number(currentMonthData.expenses[cardValueItemId]||0) - tx.amount);
-    }
-    tx.itemId = newItemId;
-    tx.isDuplicate = false;
   }
+  tx.itemId = newItemId;
+  tx.isDuplicate = (newLabel === '중복');
   return true;
 }
 
@@ -1719,21 +1717,20 @@ async function reclassifyCardTransaction(txId, newLabel){
   const tx = list.find(t=>t.id===txId);
   if(!tx) return;
 
-  const ok = applyReclassifyToTx(tx, newLabel);
+  const ok = await applyReclassifyToTx(tx, newLabel);
   if(!ok){
-    alert('"카드값" 항목을 찾지 못해 입력중복 처리를 할 수 없습니다.');
     renderCardHistory();
     return;
   }
 
   // 같은 가맹점명을 가진 다른 거래들도 함께 맞춰줌
   let matchedCount = 1;
-  list.forEach(other=>{
-    if(other === tx || other.merchant !== tx.merchant) return;
+  for(const other of list){
+    if(other === tx || other.merchant !== tx.merchant) continue;
     const otherCurrentLabel = other.isDuplicate ? '중복' : quickLabelForItemId(other.itemId);
-    if(otherCurrentLabel === newLabel) return; // 이미 같은 분류면 건드리지 않음
-    if(applyReclassifyToTx(other, newLabel)) matchedCount++;
-  });
+    if(otherCurrentLabel === newLabel) continue; // 이미 같은 분류면 건드리지 않음
+    if(await applyReclassifyToTx(other, newLabel)) matchedCount++;
+  }
 
   // 앞으로도 이 가맹점은 자동으로 이 분류로 인식되도록 규칙 저장
   if(newLabel !== '중복'){
@@ -1767,12 +1764,11 @@ function removeCardTransactionSilently(txId){
   if(idx === -1) return;
   const tx = list[idx];
   const cardValueItemId = findCardValueItemId();
-  if(tx.isDuplicate){
-    // 입력중복 처리로 차감했던 금액을 되돌림
+  // 구버전 호환: 예전엔 입력중복 거래의 itemId가 "카드값" 자신을 직접 가리켰음
+  if(tx.isDuplicate && tx.itemId === cardValueItemId){
     if(tx.itemId) currentMonthData.expenses[tx.itemId] = Number(currentMonthData.expenses[tx.itemId]||0) + tx.amount;
   } else {
     currentMonthData.expenses[tx.itemId] = Math.max(0, Number(currentMonthData.expenses[tx.itemId]||0) - tx.amount);
-    // 일반 분류였다면 카드값에서도 차감됐던 것이므로 함께 복원
     if(cardValueItemId && tx.itemId !== cardValueItemId){
       currentMonthData.expenses[cardValueItemId] = Number(currentMonthData.expenses[cardValueItemId]||0) + tx.amount;
     }
@@ -1793,7 +1789,7 @@ async function undoAllCardTransactions(){
   const cardValueItemId = findCardValueItemId();
   const listSet = new Set(list);
   list.forEach(tx=>{
-    if(tx.isDuplicate){
+    if(tx.isDuplicate && tx.itemId === cardValueItemId){
       if(tx.itemId) currentMonthData.expenses[tx.itemId] = Number(currentMonthData.expenses[tx.itemId]||0) + tx.amount;
     } else {
       currentMonthData.expenses[tx.itemId] = Math.max(0, Number(currentMonthData.expenses[tx.itemId]||0) - tx.amount);
