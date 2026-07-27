@@ -209,7 +209,7 @@
         <span class="status" id="cardBrandHint" style="margin:0;"></span>
       </div>
 
-      <div id="pdfDropzone" class="dropzone" onclick="document.getElementById('pdfFileInput').click()">
+      <div id="pdfDropzone" class="dropzone" onclick="if(!selectedCardBrand){alert('먼저 위에서 카드를 선택해주세요.');return;} document.getElementById('pdfFileInput').click()">
         <span id="dropzoneText">📄 ② 카드 명세서 PDF를 여기로 드래그하거나 클릭해서 업로드하세요</span>
         <input type="file" id="pdfFileInput" accept="application/pdf" style="display:none;" onchange="handlePdfFileInput(event)">
       </div>
@@ -1208,6 +1208,10 @@ function embedDatesIntoLines(lines){
 
 async function handlePdfFile(file){
   const statusEl = document.getElementById('pdfStatus');
+  if(!selectedCardBrand){
+    alert('먼저 위에서 카드를 선택해주세요. 카드를 선택해야 어느 카드값에서 반영/차감되는지 알 수 있습니다.');
+    return;
+  }
   if(!file || file.type !== 'application/pdf'){
     statusEl.textContent = 'PDF 파일만 업로드할 수 있습니다.';
     return;
@@ -1249,6 +1253,10 @@ let parsedRows = [];
 async function parseCardStatement(isReload){
   const raw = document.getElementById('cardPaste').value.trim();
   if(!raw){ return; }
+  if(!selectedCardBrand && !isReload){
+    alert('먼저 위에서 카드를 선택해주세요. 카드를 선택해야 어느 카드값에서 반영/차감되는지 알 수 있습니다.');
+    return;
+  }
   const rawLines = raw.split('\n').map(l=>l.trim()).filter(l=>l.length>0);
   parsedRows = [];
   showAllCardRows = true;
@@ -1451,6 +1459,17 @@ function toggleCardBrandDetail(brand){
   selectCardBrand(brand);
 }
 
+// 재분류용 버튼 그룹 HTML 생성 (분류결과 화면과 동일한 버튼 스타일)
+function reclassifyButtonsHtml(tx){
+  const currentLabel = tx.isDuplicate ? '중복' : quickLabelForItemId(tx.itemId);
+  const btns = ["외식비","생활비","의류비","의료비","교통비","여가비","기타"].map(label=>
+    `<button type="button" class="quick-btn ${currentLabel===label?'active':''}" onclick="reclassifyCardTransaction('${tx.id}','${label}')">${label}</button>`
+  ).join('');
+  const dupBtn = `<button type="button" class="quick-btn dup ${currentLabel==='중복'?'active':''}" onclick="reclassifyCardTransaction('${tx.id}','중복')">입력중복</button>`;
+  const hint = tx.isDuplicate ? `<div class="status" style="margin:2px 0 0;">카드값에서 차감됨</div>` : '';
+  return `<div class="quick-btn-group">${dupBtn}${btns}</div>${hint}`;
+}
+
 function renderCardBrandDetail(){
   const panel = document.getElementById('cardBrandDetailPanel');
   const body = document.getElementById('cardBrandDetailBody');
@@ -1462,17 +1481,11 @@ function renderCardBrandDetail(){
     body.innerHTML = `<tr><td colspan="4" class="empty">${selectedCardBrand}카드로 반영된 내역이 없습니다</td></tr>`;
     return;
   }
-  const reclassifyOptions = QUICK_LABELS.concat(['중복']);
   body.innerHTML = txList.map(tx=>{
-    const currentLabel = tx.isDuplicate ? '중복' : quickLabelForItemId(tx.itemId);
-    const hint = tx.isDuplicate ? ` <span class="status" style="margin:0;">(카드값에서 차감됨)</span>` : '';
-    const selectHtml = `<select class="mini-select" onchange="reclassifyCardTransaction('${tx.id}', this.value)">
-      ${reclassifyOptions.map(l=>`<option value="${l}" ${l===currentLabel?'selected':''}>${l==='중복'?'입력중복':l}</option>`).join('')}
-    </select>${hint}`;
     return `<tr>
       <td>${tx.merchant}</td>
       <td>${fmt(tx.amount)}</td>
-      <td>${selectHtml}</td>
+      <td>${reclassifyButtonsHtml(tx)}</td>
       <td><span class="del-x" onclick="removeCardTransaction('${tx.id}')">✕</span></td>
     </tr>`;
   }).join('');
@@ -1695,17 +1708,11 @@ function renderCardHistory(){
     tbody.innerHTML = `<tr><td colspan="4" class="empty">${selectedCardBrand ? `${selectedCardBrand}카드로 반영된 내역이 없습니다` : '이번 달에 반영된 카드 내역이 없습니다'}</td></tr>`;
     return;
   }
-  const reclassifyOptions = QUICK_LABELS.concat(['중복']);
   tbody.innerHTML = list.map(tx=>{
-    const currentLabel = tx.isDuplicate ? '중복' : quickLabelForItemId(tx.itemId);
-    const hint = tx.isDuplicate ? ` <span class="status" style="margin:0;">(카드값에서 차감됨)</span>` : '';
-    const selectHtml = `<select class="mini-select" onchange="reclassifyCardTransaction('${tx.id}', this.value)">
-      ${reclassifyOptions.map(l=>`<option value="${l}" ${l===currentLabel?'selected':''}>${l==='중복'?'입력중복':l}</option>`).join('')}
-    </select>${hint}`;
     return `<tr>
       <td>${tx.merchant}</td>
       <td>${fmt(tx.amount)}</td>
-      <td>${selectHtml}</td>
+      <td>${reclassifyButtonsHtml(tx)}</td>
       <td><span class="del-x" onclick="removeCardTransaction('${tx.id}')">✕</span></td>
     </tr>`;
   }).join('');
