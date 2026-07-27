@@ -391,19 +391,35 @@ function buildMonthSelector(){
   });
 }
 
+function isValidCategorySchema(loaded){
+  if(!Array.isArray(loaded) || loaded.length===0) return false;
+  return loaded.every(cat =>
+    cat && typeof cat === 'object' && Array.isArray(cat.items) &&
+    cat.items.every(it => it && typeof it === 'object' && typeof it.id === 'string' && typeof it.name === 'string')
+  );
+}
+
 async function loadConfig(){
   if(!firebaseReady) return;
   try{
     const snap = await db.collection('config').doc('categories').get();
-    if(snap.exists && snap.data().majorCategories){
-      categories = snap.data().majorCategories;
+    const loaded = snap.exists ? snap.data().majorCategories : null;
+    if(loaded && isValidCategorySchema(loaded)){
+      categories = loaded;
     } else {
+      // 구버전 데이터(문자열 배열 등) 또는 데이터 없음 → 새 구조로 초기화
+      categories = JSON.parse(JSON.stringify(DEFAULT_CATEGORIES));
       await db.collection('config').doc('categories').set({majorCategories: categories});
     }
+
     const rsnap = await db.collection('config').doc('merchantRules').get();
-    if(rsnap.exists && rsnap.data().rules){
-      merchantRules = rsnap.data().rules;
+    const loadedRules = rsnap.exists ? rsnap.data().rules : null;
+    const rulesValid = loadedRules && typeof loadedRules === 'object' &&
+      Object.values(loadedRules).every(v => typeof v === 'string' && findItemById(v));
+    if(rulesValid){
+      merchantRules = loadedRules;
     } else {
+      merchantRules = Object.assign({}, DEFAULT_RULES);
       await db.collection('config').doc('merchantRules').set({rules: merchantRules});
     }
   }catch(e){ console.error('설정 로드 실패', e); }
