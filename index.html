@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>알토란 household-budget</title>
+<title>household-budget</title>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
@@ -666,22 +666,30 @@ if(window.pdfjsLib){
 
 async function extractTextFromPdf(file){
   const buf = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({data: buf}).promise;
+  const pdf = await pdfjsLib.getDocument({
+    data: buf,
+    cMapUrl: "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/cmaps/",
+    cMapPacked: true,
+    standardFontDataUrl: "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/standard_fonts/"
+  }).promise;
   let lines = [];
   for(let p=1; p<=pdf.numPages; p++){
     const page = await pdf.getPage(p);
     const content = await page.getTextContent();
-    // y좌표 기준으로 같은 줄 항목을 묶어서 재구성
-    const rows = {};
-    content.items.forEach(item=>{
-      const y = Math.round(item.transform[5]);
-      if(!rows[y]) rows[y] = [];
-      rows[y].push({x: item.transform[4], text: item.str});
+    // y좌표가 비슷한 항목끼리 묶어서 같은 줄로 재구성 (완전히 같은 값이 아니어도 허용 오차 내면 병합)
+    const items = content.items.map(it=>({ x: it.transform[4], y: it.transform[5], text: it.str }))
+      .filter(it=> it.text && it.text.trim().length>0)
+      .sort((a,b)=> b.y - a.y || a.x - b.x);
+    const rows = [];
+    const TOLERANCE = 2.5;
+    items.forEach(it=>{
+      let row = rows.find(r => Math.abs(r.y - it.y) <= TOLERANCE);
+      if(!row){ row = {y: it.y, items: []}; rows.push(row); }
+      row.items.push(it);
     });
-    const sortedY = Object.keys(rows).map(Number).sort((a,b)=>b-a);
-    sortedY.forEach(y=>{
-      const rowItems = rows[y].sort((a,b)=>a.x-b.x);
-      const lineText = rowItems.map(r=>r.text).join(' ').replace(/\s+/g,' ').trim();
+    rows.forEach(row=>{
+      row.items.sort((a,b)=>a.x-b.x);
+      const lineText = row.items.map(r=>r.text).join(' ').replace(/\s+/g,' ').trim();
       if(lineText) lines.push(lineText);
     });
   }
@@ -731,22 +739,37 @@ let parsedRows = [];
 function parseCardStatement(){
   const raw = document.getElementById('cardPaste').value.trim();
   if(!raw){ return; }
-  const lines = raw.split('\n').map(l=>l.trim()).filter(l=>l.length>0);
+  const rawLines = raw.split('\n').map(l=>l.trim()).filter(l=>l.length>0);
   parsedRows = [];
-  lines.forEach(line=>{
-    const parts = line.split(/[,\t]+/).map(p=>p.trim()).filter(p=>p.length>0);
-    let finalParts = parts;
-    if(parts.length < 3){
-      finalParts = line.split(/\s{2,}|\s(?=\d)/).map(p=>p.trim()).filter(p=>p.length>0);
+  rawLines.forEach(line=>{
+    // 1) 콤마/탭으로 직접 붙여넣은 경우 (날짜, 가맹점, 금액)
+    const csvParts = line.split(/[,\t]+/).map(p=>p.trim()).filter(p=>p.length>0);
+    if(csvParts.length>=3){
+      const amountRaw = csvParts[csvParts.length-1].replace(/[^\d-]/g,'');
+      const amount = Number(amountRaw)||0;
+      const date = csvParts[0];
+      const merchant = csvParts.slice(1,-1).join(' ');
+      if(merchant && amount){
+        parsedRows.push({date, merchant, amount, matchedItemId: matchMerchant(merchant)});
+      }
+      return;
     }
-    if(finalParts.length < 2) return;
-    const amountRaw = finalParts[finalParts.length-1].replace(/[^\d-]/g,'');
-    const amount = Number(amountRaw)||0;
-    const date = finalParts.length>=3 ? finalParts[0] : '';
-    const merchant = finalParts.length>=3 ? finalParts.slice(1,-1).join(' ') : finalParts[0];
-    if(!merchant || !amount) return;
-    const matched = matchMerchant(merchant);
-    parsedRows.push({date, merchant, amount, matchedItemId: matched});
+    // 2) PDF에서 추출한 자유 형식 텍스트: '원'으로 끝나는 금액이 있는 줄만 거래 내역으로 인식
+    const amountMatch = line.match(/([\d,]{3,})\s*원\s*$/);
+    if(!amountMatch) return; // 금액 패턴이 없으면 이용기간/안내문구 등 잡음으로 간주하고 제외
+    const amount = Number(amountMatch[1].replace(/,/g,'')) || 0;
+    if(!amount) return;
+    let rest = line.slice(0, amountMatch.index).trim();
+    // 날짜 패턴 추출 (예: 26.7.26 / 26. 7. 26 / 07/26 / 6월 27일)
+    const dateMatch = rest.match(/^(\d{1,4}\s*[.\/]\s*\d{1,2}\s*[.\/]\s*\d{1,2}|\d{1,2}\s*[.\/]\s*\d{1,2}|\d{1,2}월\s*\d{1,2}일)/);
+    let date = '', merchant = rest;
+    if(dateMatch){
+      date = dateMatch[0].replace(/\s+/g,'');
+      merchant = rest.slice(dateMatch[0].length).trim();
+    }
+    // 가맹점명이 비어있거나 숫자/기호만 남은 잡음 줄은 제외
+    if(!merchant || /^[\d\s.\-]+$/.test(merchant)) return;
+    parsedRows.push({date, merchant, amount, matchedItemId: matchMerchant(merchant)});
   });
   renderCardResults();
 }
