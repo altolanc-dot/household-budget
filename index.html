@@ -380,19 +380,21 @@ const DEFAULT_CATEGORIES = [
       {id:"l7", name:"외식비", person:"공통", amount:0},
       {id:"l8", name:"의료비", person:"공통", amount:0},
       {id:"l9", name:"의류비", person:"공통", amount:0},
-      {id:"l10", name:"교통비", person:"공통", amount:0}
+      {id:"l10", name:"교통비", person:"공통", amount:0},
+      {id:"l11", name:"여가비", person:"공통", amount:0}
   ]}
 ];
 
 // 카드 자동분류 큰 카테고리(퀵버튼) 라벨과, 각 라벨이 매핑되는 카테고리명/우선 항목명
-// → 전부 "생활비" 카테고리 하위 항목으로 통합 (카드값 하나에 생활비/외식비/의료비/의류비/교통비/기타로 세분화하는 개념)
-const QUICK_LABELS = ["교통비","생활비","의료비","의류비","외식비","기타"];
+// → 전부 "생활비" 카테고리 하위 항목으로 통합 (카드값 하나에 생활비/외식비/의료비/의류비/교통비/여가비/기타로 세분화하는 개념)
+const QUICK_LABELS = ["교통비","생활비","의료비","의류비","외식비","여가비","기타"];
 const QUICK_TARGET_MAP = {
   "교통비": { cat:"생활비", itemName:"교통비" },
   "생활비": { cat:"생활비", itemName:"마트/편의점" },
   "의료비": { cat:"생활비", itemName:"의료비" },
   "의류비": { cat:"생활비", itemName:"의류비" },
   "외식비": { cat:"생활비", itemName:"외식비" },
+  "여가비": { cat:"생활비", itemName:"여가비" },
   "기타":   { cat:"생활비", itemName:"기타(카드)" }
 };
 
@@ -415,7 +417,11 @@ const DEFAULT_RULES = {
   "식당":"외식비", "국수":"외식비", "치킨":"외식비", "피자":"외식비", "김밥":"외식비", "분식":"외식비",
   "고기":"외식비", "한우":"외식비", "삼겹":"외식비", "곱창":"외식비", "족발":"외식비",
   "배달의민족":"외식비", "요기요":"외식비", "쿠팡이츠":"외식비",
-  "카페":"외식비", "커피":"외식비", "스타벅스":"외식비", "이디야":"외식비", "투썸":"외식비", "빽다방":"외식비"
+  "카페":"외식비", "커피":"외식비", "스타벅스":"외식비", "이디야":"외식비", "투썸":"외식비", "빽다방":"외식비",
+  // 여가비
+  "영화":"여가비", "CGV":"여가비", "롯데시네마":"여가비", "메가박스":"여가비", "골프":"여가비",
+  "노래방":"여가비", "코인노래":"여가비", "볼링":"여가비", "PC방":"여가비", "놀이공원":"여가비",
+  "워터파크":"여가비", "스크린골프":"여가비", "당구":"여가비", "찜질방":"여가비"
 };
 
 let categories = JSON.parse(JSON.stringify(DEFAULT_CATEGORIES));
@@ -1192,7 +1198,7 @@ function toggleShowAllCardRows(){
 function renderCardQuickSummary(){
   const wrap = document.getElementById('cardQuickSummary');
   if(!wrap) return;
-  const labelsForSummary = ["외식비","생활비","의류비","의료비","교통비","기타","중복"];
+  const labelsForSummary = ["외식비","생활비","의류비","의료비","교통비","여가비","기타","중복"];
   const totals = {};
   labelsForSummary.forEach(l=> totals[l] = {count:0, amount:0});
   parsedRows.forEach(r=>{
@@ -1225,9 +1231,11 @@ function renderCardResults(){
 
   const unclassified = parsedRows.filter(r=>!r.actionLabel);
   const classifiedCount = parsedRows.length - unclassified.length;
+  const committedCount = parsedRows.filter(r=>r.txId).length;
+  const pendingCount = parsedRows.filter(r=>r.actionLabel && !r.txId).length;
   if(summaryEl){
-    const committedBadge = cardBatchCommitted
-      ? `<span class="tag matched" style="margin-left:8px;">월별 입력에 반영 완료</span>`
+    const committedBadge = committedCount>0
+      ? `<span class="tag matched" style="margin-left:8px;">${committedCount}건 월별 입력에 반영됨</span>`
       : '';
     summaryEl.innerHTML = `저장된 규칙으로 <b>${classifiedCount}건</b> 자동 분류됨, <b>${unclassified.length}건</b> 미분류
       <button class="ghost" style="margin-left:8px;padding:3px 10px;font-size:12px;" onclick="toggleShowAllCardRows()">${showAllCardRows ? '미분류만 보기' : '전체 보기'}</button>${committedBadge}`;
@@ -1238,12 +1246,12 @@ function renderCardResults(){
   const confirmBtn = document.getElementById('confirmImportBtn');
   const confirmStatus = document.getElementById('confirmImportStatus');
   if(confirmBtn){
-    confirmBtn.disabled = cardBatchCommitted;
-    confirmBtn.textContent = cardBatchCommitted ? '반영 완료됨' : '이번 달에 반영하기';
+    confirmBtn.disabled = pendingCount === 0;
+    confirmBtn.textContent = pendingCount > 0 ? `이번 달에 반영하기 (${pendingCount}건 대기)` : '반영할 새 항목 없음';
   }
   if(confirmStatus){
-    confirmStatus.textContent = cardBatchCommitted
-      ? '이 내용은 이미 월별 입력(생활비 하위 항목)에 반영되었습니다. 다시 반영하려면 새로 분석해주세요.'
+    confirmStatus.textContent = committedCount>0
+      ? '직접 버튼을 눌러 분류를 바꾸면 그 즉시 월별 입력에 반영됩니다.'
       : '';
   }
 
@@ -1258,11 +1266,10 @@ function renderCardResults(){
     const tagHtml = row.actionLabel
       ? (row.actionLabel==='중복' ? `<span class="tag" style="background:#fff2e0;color:var(--warn);">입력중복</span>` : `<span class="tag matched">${row.actionLabel}</span>`)
       : `<span class="tag unclassified">미분류</span>`;
-    const disabledAttr = cardBatchCommitted ? 'disabled' : '';
-    const btns = ["외식비","생활비","의류비","의료비","교통비","기타"].map(label=>
-      `<button type="button" ${disabledAttr} class="quick-btn ${row.actionLabel===label?'active':''}" onclick="setRowQuickAction(${idx},'${label}')">${label}</button>`
+    const btns = ["외식비","생활비","의류비","의료비","교통비","여가비","기타"].map(label=>
+      `<button type="button" class="quick-btn ${row.actionLabel===label?'active':''}" onclick="setRowQuickAction(${idx},'${label}')">${label}</button>`
     ).join('');
-    const dupBtn = `<button type="button" ${disabledAttr} class="quick-btn dup ${row.actionLabel==='중복'?'active':''}" onclick="setRowQuickAction(${idx},'중복')">입력중복</button>`;
+    const dupBtn = `<button type="button" class="quick-btn dup ${row.actionLabel==='중복'?'active':''}" onclick="setRowQuickAction(${idx},'중복')">입력중복</button>`;
     const allBtns = dupBtn + btns;
     return `<tr>
       <td>${row.date}</td>
@@ -1274,74 +1281,86 @@ function renderCardResults(){
   }).join('');
 }
 
-function setRowQuickAction(idx, label){
-  if(cardBatchCommitted) return; // 이미 반영된 배치는 이 화면에서 재분류 불가 (반영된 카드 내역 목록에서 재분류하세요)
-  const merchant = parsedRows[idx].merchant;
-  parsedRows[idx].actionLabel = label;
-  if(label !== '중복'){
-    // 같은 가맹점명을 가진 다른 미분류 행에도 즉시 자동 적용
-    parsedRows.forEach(r=>{ if(r.merchant===merchant && !r.actionLabel){ r.actionLabel = label; } });
-    // 규칙으로 즉시 저장해서 다음 명세서부터도 자동 인식되도록 함
-    if(!merchantRules[merchant]){
-      merchantRules[merchant] = label;
-      saveRules();
-      renderRuleTable();
+async function setRowQuickAction(idx, label){
+  const row = parsedRows[idx];
+  const merchant = row.merchant;
+
+  // 이미 반영된 행이면 바로 재분류(되돌리고 새로 적용)
+  if(row.txId){
+    await reclassifyCardTransaction(row.txId, label);
+    row.actionLabel = label;
+    renderCardResults();
+    return;
+  }
+
+  // 아직 반영 전인 행 → 라벨 지정과 동시에 즉시 실제 데이터에 반영
+  row.actionLabel = label;
+  await commitSingleRow(row);
+
+  // 같은 가맹점명을 가진 다른 미분류 행에도 동일하게 적용 + 즉시 반영
+  for(const r of parsedRows){
+    if(r !== row && r.merchant === merchant && !r.actionLabel){
+      r.actionLabel = label;
+      await commitSingleRow(r);
     }
   }
+
+  cardBatchCommitted = true;
   renderCardResults();
 }
 
-async function confirmCardImport(){
-  if(cardBatchCommitted) return; // 이미 반영된 배치는 중복 반영 방지
-  let addedCount = 0;
-  let dupCount = 0;
-  let skippedDup = 0;
-  let configChanged = false;
-  const breakdown = {}; // 라벨별 합계 (완료 메시지용)
+// 한 행을 실제 지출 데이터에 즉시 반영(커밋)한다. 이미 반영된 행(row.txId 있음)은 건드리지 않는다.
+async function commitSingleRow(row){
+  if(row.txId || !row.actionLabel) return false;
   if(!currentMonthData.cardTransactions) currentMonthData.cardTransactions = [];
-  const cardValueItemId = findCardValueItemId();
 
-  parsedRows.forEach(row=>{
-    if(!row.actionLabel) return; // 분류를 지정하지 않은 행은 반영하지 않음
-
-    if(row.actionLabel === '중복'){
-      if(cardValueItemId){
-        currentMonthData.expenses[cardValueItemId] = Math.max(0, Number(currentMonthData.expenses[cardValueItemId]||0) - row.amount);
-        currentMonthData.cardTransactions.push({
-          id: genId('tx'), date: row.date||'', merchant: row.merchant, amount: row.amount,
-          itemId: cardValueItemId, isDuplicate: true
-        });
-        dupCount++;
-      } else {
-        skippedDup++;
-      }
-      return;
+  if(row.actionLabel === '중복'){
+    const cardValueItemId = findCardValueItemId();
+    if(!cardValueItemId){
+      alert(`"${row.merchant}" 처리 실패: "카드값" 항목을 찾지 못해 입력중복 처리를 할 수 없습니다.`);
+      row.actionLabel = '';
+      return false;
     }
-
+    currentMonthData.expenses[cardValueItemId] = Math.max(0, Number(currentMonthData.expenses[cardValueItemId]||0) - row.amount);
+    const tx = { id: genId('tx'), date: row.date||'', merchant: row.merchant, amount: row.amount, itemId: cardValueItemId, isDuplicate: true };
+    currentMonthData.cardTransactions.push(tx);
+    row.txId = tx.id;
+  } else {
     const before = categories.some(c=>c.name===QUICK_TARGET_MAP[row.actionLabel]?.cat);
     const itemId = resolveQuickTargetItemId(row.actionLabel);
-    if(!before) configChanged = true;
-    if(!itemId) return;
+    if(!before) await saveConfig();
     currentMonthData.expenses[itemId] = Number(currentMonthData.expenses[itemId]||0) + row.amount;
-    currentMonthData.cardTransactions.push({
-      id: genId('tx'), date: row.date||'', merchant: row.merchant, amount: row.amount, itemId
-    });
-    addedCount++;
-    breakdown[row.actionLabel] = (breakdown[row.actionLabel]||0) + row.amount;
-    const shortKeyword = row.merchant.split(' ')[0];
-    if(shortKeyword && !merchantRules[shortKeyword]){
+    const tx = { id: genId('tx'), date: row.date||'', merchant: row.merchant, amount: row.amount, itemId };
+    currentMonthData.cardTransactions.push(tx);
+    row.txId = tx.id;
+    const shortKeyword = row.merchant;
+    if(!merchantRules[shortKeyword]){
       merchantRules[shortKeyword] = row.actionLabel;
+      await saveRules();
+      renderRuleTable();
     }
-  });
-
-  if(configChanged) await saveConfig();
+  }
   await saveMonth(currentMonthKey);
-  await saveRules();
   renderCategoryEditor();
-  renderRuleTable();
   renderCardHistory();
+  return true;
+}
 
-  // 화면 형식은 그대로 유지 (초기화/숨김하지 않음) — 반영 완료 상태로만 전환
+async function confirmCardImport(){
+  const rowsToCommit = parsedRows.filter(r=>r.actionLabel && !r.txId);
+  if(rowsToCommit.length===0){
+    alert('반영할 새로운 분류 항목이 없습니다. (이미 반영된 항목을 고치려면 표에서 버튼을 다시 눌러주세요 — 바로 반영됩니다)');
+    return;
+  }
+  let addedCount = 0, dupCount = 0, skippedDup = 0;
+  const breakdown = {};
+  for(const row of rowsToCommit){
+    const ok = await commitSingleRow(row);
+    if(!ok) { skippedDup++; continue; }
+    if(row.actionLabel === '중복'){ dupCount++; }
+    else { addedCount++; breakdown[row.actionLabel] = (breakdown[row.actionLabel]||0) + row.amount; }
+  }
+
   cardBatchCommitted = true;
   renderCardResults();
 
@@ -1349,7 +1368,7 @@ async function confirmCardImport(){
   const breakdownLines = Object.keys(breakdown).map(label=>`  · ${label}: ${fmt(breakdown[label])}`).join('\n');
   if(breakdownLines) msg += breakdownLines + '\n';
   if(dupCount>0) msg += `${dupCount}건은 입력중복 처리되어 "카드값" 항목에서 차감했습니다.\n`;
-  if(skippedDup>0) msg += `("카드값" 항목을 찾지 못해 ${skippedDup}건은 차감되지 않았습니다. 설정 탭에서 "카드값"이라는 이름의 항목이 있는지 확인해주세요.)`;
+  if(skippedDup>0) msg += `("카드값" 항목을 찾지 못해 ${skippedDup}건은 처리되지 않았습니다. 설정 탭에서 "카드값"이라는 이름의 항목이 있는지 확인해주세요.)`;
   alert(msg);
 }
 
