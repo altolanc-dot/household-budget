@@ -452,8 +452,11 @@ function fixedTotal(){
   return categories.filter(c=>c.fixed)
     .reduce((s,c)=> s + c.items.reduce((s2,it)=>s2+Number(it.amount||0),0), 0);
 }
+// 변동비 총합은 "현재 존재하는 카테고리/항목의 합"으로만 계산한다.
+// (예전 구조 변경 과정에서 남은 항목id에 딸린 금액이 있어도, 화면에 안 보이는 값이 총액에 몰래 더해지지 않도록)
 function variableTotal(monthData){
-  return Object.values(monthData.expenses||{}).reduce((a,b)=>a+Number(b||0),0);
+  return categories.filter(c=>!c.fixed)
+    .reduce((s,c)=> s + categoryTotal(c, monthData), 0);
 }
 function monthTotalExpense(monthData){
   return fixedTotal() + variableTotal(monthData);
@@ -461,6 +464,27 @@ function monthTotalExpense(monthData){
 function categoryTotal(cat, monthData){
   if(cat.fixed) return cat.items.reduce((s,it)=>s+Number(it.amount||0),0);
   return cat.items.reduce((s,it)=> s + Number((monthData.expenses||{})[it.id]||0), 0);
+}
+// 현재 어떤 카테고리 항목에도 연결되지 않은 채 남아있는 "고아" 금액 (구조 변경 과정에서 끊긴 데이터)
+function orphanedExpenseTotal(monthData){
+  const validIds = new Set();
+  categories.forEach(c=> c.items.forEach(it=> validIds.add(it.id)));
+  return Object.entries(monthData.expenses||{})
+    .filter(([id])=> !validIds.has(id))
+    .reduce((s,[,v])=> s + Number(v||0), 0);
+}
+// 고아 금액을 정리(삭제)한다 — 어떤 카테고리와도 연결되지 않아 화면에 보이지 않는 값이므로 제거해도 표시상 손실이 없음
+async function cleanupOrphanedExpenses(){
+  const validIds = new Set();
+  categories.forEach(c=> c.items.forEach(it=> validIds.add(it.id)));
+  const removedKeys = Object.keys(currentMonthData.expenses||{}).filter(id=>!validIds.has(id));
+  if(removedKeys.length===0){ alert('정리할 고아 데이터가 없습니다.'); return; }
+  const total = removedKeys.reduce((s,id)=>s+Number(currentMonthData.expenses[id]||0),0);
+  if(!confirm(`어떤 카테고리 항목과도 연결되지 않은 금액 ${fmt(total)} (${removedKeys.length}개 항목)을 삭제하시겠습니까?`)) return;
+  removedKeys.forEach(id=> delete currentMonthData.expenses[id]);
+  await saveMonth(currentMonthKey);
+  renderCategoryEditor();
+  renderSummaryCards();
 }
 
 /* ---------------- 초기화 ---------------- */
@@ -846,6 +870,7 @@ function renderSummaryCards(){
   const totalExpense = fixedSum + variableSum;
   const totalIncome = (currentMonthData.income||[]).reduce((a,b)=>a+Number(b.amount||0),0);
   const balance = totalIncome - totalExpense;
+  const orphanSum = orphanedExpenseTotal(currentMonthData);
   wrap.innerHTML = `
     <div class="card" style="cursor:pointer;" onclick="toggleSummaryDetail('summaryDetail-monthly','income')"><div class="label">${currentMonthKey} 총수입</div><div class="value income">${fmt(totalIncome)}</div></div>
     <div class="card" style="cursor:pointer;" onclick="toggleSummaryDetail('summaryDetail-monthly','expense')">
@@ -854,6 +879,12 @@ function renderSummaryCards(){
       <div class="delta">고정비(주거비 외+보험비) ${fmt(fixedSum)} + 변동비(교육비·생활비·카드분류 등) ${fmt(variableSum)}</div>
     </div>
     <div class="card"><div class="label">잔액</div><div class="value" style="color:${balance>=0?'var(--income)':'var(--expense)'}">${fmt(balance)}</div></div>
+    ${orphanSum > 0 ? `
+    <div class="card" style="border-color:var(--warn);">
+      <div class="label" style="color:var(--warn);">⚠ 연결 끊긴 금액 (총지출에 미포함)</div>
+      <div class="value" style="color:var(--warn);">${fmt(orphanSum)}</div>
+      <div class="delta"><button class="ghost" style="padding:3px 10px;font-size:11px;" onclick="cleanupOrphanedExpenses()">정리하기</button></div>
+    </div>` : ''}
   `;
 }
 
