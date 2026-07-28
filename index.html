@@ -69,6 +69,19 @@
   @media (max-width:1000px){.grid3{grid-template-columns:1fr 1fr;}}
   @media (max-width:600px){.grid3{grid-template-columns:1fr;}}
 
+  /* ---- 통계/분석 탭 압축 레이아웃 ---- */
+  #tab-stats .cards{margin-bottom:8px;}
+  #tab-stats .panel{padding:10px 12px;margin-bottom:10px;}
+  #tab-stats .panel h2{font-size:12.5px;margin:0 0 6px;}
+  .stats-top-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-bottom:8px;}
+  .stats-grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:10px;}
+  @media (max-width:1100px){.stats-grid4{grid-template-columns:1fr 1fr;}}
+  @media (max-width:600px){.stats-grid4{grid-template-columns:1fr;}}
+  .stats-grid4 .panel{display:flex;flex-direction:column;margin-bottom:0;}
+  .stats-scroll-table{overflow-y:auto;max-height:150px;}
+  .stats-scroll-table table{font-size:11.5px;}
+  .stats-scroll-table th,.stats-scroll-table td{padding:4px 5px;}
+
   .panel-header-toggle{display:flex;justify-content:space-between;align-items:center;cursor:pointer;user-select:none;}
   .income-total-badge{font-size:11px;color:var(--income);font-weight:700;margin-left:6px;}
   .toggle-arrow{color:var(--sub);font-size:12px;transition:transform .2s;}
@@ -159,7 +172,6 @@
 
   <div class="tabs">
     <div class="tab active" data-tab="monthly">월별 입력</div>
-    <div class="tab" data-tab="income">수입 입력</div>
     <div class="tab" data-tab="card">카드 명세서 자동분류</div>
     <div class="tab" data-tab="stats">통계/분석</div>
     <div class="tab" data-tab="annual">연간 고정비</div>
@@ -178,21 +190,6 @@
     <div id="summaryDetail-monthly" class="panel" style="display:none;"></div>
     <p class="status" style="margin:-6px 0 12px;">"주거비 외"와 "보험비"는 매달 자동으로 같은 금액이 적용되는 고정비입니다. 금액이 바뀌었을 때만 직접 수정하세요. 나머지 카테고리는 항목명·담당자·금액을 이 화면에서 바로 수정할 수 있습니다.</p>
     <div id="categoryEditor"></div>
-  </div>
-
-  <!-- ===== INCOME TAB ===== -->
-  <div id="tab-income" style="display:none;">
-    <div class="cards" id="incomeSummaryCards"></div>
-    <div id="summaryDetail-income" class="panel" style="display:none;"></div>
-    <div class="panel">
-      <h2>수입 입력</h2>
-      <div class="row-flex" style="margin-bottom:10px;">
-        <input type="text" id="incomeName" placeholder="수입 항목 (예: 급여, 상여)" style="width:200px;">
-        <input type="text" inputmode="numeric" id="incomeAmount" placeholder="금액" style="width:140px;" oninput="formatAmountInput(this)">
-        <button onclick="addIncome()">추가</button>
-      </div>
-      <table id="incomeTable"><thead><tr><th>항목</th><th>금액</th><th></th></tr></thead><tbody></tbody></table>
-    </div>
   </div>
 
   <!-- ===== CARD TAB ===== -->
@@ -252,43 +249,57 @@
 
   <!-- ===== STATS TAB ===== -->
   <div id="tab-stats" style="display:none;">
-    <div class="cards" id="statsSummaryCards"></div>
-    <div class="cards" id="momCompareCards" style="margin-top:-4px;"></div>
+    <div class="stats-top-cards">
+      <div id="statsSummaryCards" style="display:contents;"></div>
+      <div id="momCompareCards" style="display:contents;"></div>
+    </div>
 
     <div class="panel">
       <h2 id="trendChartTitle">총 지출 추이</h2>
-      <canvas id="trendChart" height="70"></canvas>
+      <canvas id="trendChart" height="45"></canvas>
     </div>
 
-    <div class="grid3">
+    <div class="stats-grid4">
       <div class="panel">
         <h2 id="donutTitle">이번 달 카테고리 비중</h2>
-        <canvas id="donutChart" height="230"></canvas>
+        <canvas id="donutChart" height="150"></canvas>
       </div>
       <div class="panel">
         <h2 id="personChartTitle">이번 달 담당자별 지출 비중</h2>
-        <canvas id="personChart" height="200"></canvas>
+        <canvas id="personChart" height="150"></canvas>
       </div>
       <div class="panel">
         <h2 id="lifeDonutTitle">이번 달 생활비 세부 비중</h2>
-        <canvas id="lifeDonutChart" height="260"></canvas>
+        <canvas id="lifeDonutChart" height="150"></canvas>
+      </div>
+      <div class="panel">
+        <h2 id="lifeDetailTitle">생활비 세부 내역</h2>
+        <div class="stats-scroll-table">
+          <table><thead><tr><th>세부 항목</th><th>금액</th><th>비중</th></tr></thead><tbody id="lifeDetailBody"></tbody></table>
+        </div>
       </div>
     </div>
 
-    <div class="grid2">
-      <div class="panel">
-        <h2 id="lifeDetailTitle">생활비 세부 내역</h2>
-        <table><thead><tr><th>세부 항목</th><th>금액</th><th>비중</th></tr></thead><tbody id="lifeDetailBody"></tbody></table>
-      </div>
-      <div class="panel">
-        <h2 id="lifeTrendTitle">생활비 추이</h2>
-        <canvas id="lifeTrendChart" height="170"></canvas>
-      </div>
+    <div class="panel">
+      <h2 id="lifeTrendTitle">생활비 추이</h2>
+      <canvas id="lifeTrendChart" height="45"></canvas>
     </div>
   </div>
 
   <!-- ===== ANNUAL TAB ===== -->
   <div id="tab-annual" style="display:none;">
+    <div class="panel">
+      <h2>수입 입력</h2>
+      <p class="status" style="margin-top:-4px;">상단의 "조회 월"을 기준으로 그 달의 수입이 입력·표시됩니다.</p>
+      <div class="cards" id="incomeSummaryCards"></div>
+      <div id="summaryDetail-income" class="panel" style="display:none;"></div>
+      <div class="row-flex" style="margin:10px 0;">
+        <input type="text" id="incomeName" placeholder="수입 항목 (예: 급여, 상여)" style="width:200px;">
+        <input type="text" inputmode="numeric" id="incomeAmount" placeholder="금액" style="width:140px;" oninput="formatAmountInput(this)">
+        <button onclick="addIncome()">추가</button>
+      </div>
+      <table id="incomeTable"><thead><tr><th>항목</th><th>금액</th><th></th></tr></thead><tbody></tbody></table>
+    </div>
     <div class="panel">
       <h2>연간 고정비 (재산세 / 자동차세 / 자동차보험료 등)</h2>
       <p class="status">월별 생활비 통계에는 포함되지 않고 별도로 관리됩니다.</p>
@@ -889,6 +900,7 @@ async function loadMonth(key){
   if(!currentMonthData.cardTransactions) currentMonthData.cardTransactions = [];
   if(!currentMonthData.cardPdfText) currentMonthData.cardPdfText = {};
   const repaired = repairLegacyItemIds();
+  const migratedDup = migrateDuplicateItemBalance();
   allMonthsCache[key] = currentMonthData;
   document.getElementById('loadStatus').textContent = '';
   ['summaryDetail-monthly','summaryDetail-income'].forEach(id=>{
@@ -900,7 +912,7 @@ async function loadMonth(key){
   renderIncomeTable();
   renderCardHistory();
   renderCardBrandButtons();
-  if(repaired) saveMonth(key);
+  if(repaired || migratedDup) saveMonth(key);
 }
 
 // 예전 버전에서 "외식비/의료비/교통비/의류비"가 독립 카테고리였을 때 쓰이던 항목 id(d1,d2,m1,m2,t1,c1)가
@@ -932,6 +944,49 @@ function repairLegacyItemIds(){
     });
   }
   return changed;
+}
+
+// 거래 하나를 실제 지출 데이터에 "적용"하는 공통 로직.
+// "입력중복"은 이미 "카드값"(원본 총액)에 포함되어 있는 금액이므로, 세부 카테고리(생활비 등)에는 더하지 않고
+// "카드값"에서만 차감한다 (그래야 이미 계산된 금액이 다른 항목에 또 표시되어 이중으로 보이지 않는다).
+function applyTxToExpenses(itemId, amount, isDup, cardValueItemId){
+  if(!isDup){
+    currentMonthData.expenses[itemId] = Number(currentMonthData.expenses[itemId]||0) + amount;
+  }
+  if(cardValueItemId && itemId !== cardValueItemId){
+    currentMonthData.expenses[cardValueItemId] = Math.max(0, Number(currentMonthData.expenses[cardValueItemId]||0) - amount);
+  }
+}
+// applyTxToExpenses의 반대 동작(되돌리기). tx.isDuplicate이면 애초에 세부 항목에 더해진 적이 없으므로 카드값만 복구한다.
+function revertTxFromExpenses(tx, cardValueItemId){
+  // 구버전 호환: 예전엔 입력중복 거래의 itemId가 "카드값" 자신을 직접 가리켰음
+  if(tx.isDuplicate && tx.itemId === cardValueItemId){
+    if(tx.itemId) currentMonthData.expenses[tx.itemId] = Number(currentMonthData.expenses[tx.itemId]||0) + tx.amount;
+    return;
+  }
+  if(!tx.isDuplicate){
+    currentMonthData.expenses[tx.itemId] = Math.max(0, Number(currentMonthData.expenses[tx.itemId]||0) - tx.amount);
+  }
+  if(cardValueItemId && tx.itemId !== cardValueItemId){
+    currentMonthData.expenses[cardValueItemId] = Number(currentMonthData.expenses[cardValueItemId]||0) + tx.amount;
+  }
+}
+// 예전 버전에서는 "입력중복" 거래도 세부 항목("생활비-입력중복")에 금액이 더해졌었다.
+// 그 결과 "카드값"에서 이미 한 번 차감된 금액이 "생활비" 쪽에 또 표시되는 이중 표시 문제가 있었다.
+// 이 함수는 그렇게 "입력중복" 항목에 남아있는 금액을 전부 "카드값"으로 되돌리고 0으로 정리한다(멱등적으로 동작).
+function migrateDuplicateItemBalance(){
+  const conf = QUICK_TARGET_MAP['중복'];
+  const cat = categories.find(c=>c.name===conf.cat);
+  const item = cat && cat.items.find(it=>it.name===conf.itemName);
+  if(!item) return false;
+  const stray = Number((currentMonthData.expenses||{})[item.id]||0);
+  if(stray === 0) return false;
+  const cardValueItemId = findCardValueItemId();
+  if(cardValueItemId && cardValueItemId !== item.id){
+    currentMonthData.expenses[cardValueItemId] = Number(currentMonthData.expenses[cardValueItemId]||0) + stray;
+  }
+  currentMonthData.expenses[item.id] = 0;
+  return true;
 }
 
 async function saveMonth(key){
@@ -968,6 +1023,9 @@ function renderCategoryEditor(){
         <span class="sum" style="color:${pal.head};">${fmt(sum)}</span>
       </div>`;
     cat.items.forEach((it, ii)=>{
+      // "입력중복" 항목은 이미 "카드값"에 포함된 금액을 표시만 안 되게 빼놓는 내부 회계용 항목이라
+      // 월별 입력 화면(생활비 카테고리 카드)에는 노출하지 않는다. (설정 탭에서는 계속 관리 가능)
+      if(!cat.fixed && it.name==='입력중복') return;
       const amtVal = cat.fixed ? it.amount : (currentMonthData.expenses[it.id] ?? '');
       const amtDisplay = amtVal === '' ? '' : fmtPlain(amtVal);
       html += `<div class="subitem-row" ondragover="onItemDragOver(event)" ondragleave="onItemDragLeave(event)" ondrop="onItemDrop(event,${ci},${ii})">
@@ -1666,13 +1724,10 @@ async function commitSingleRow(row){
   const itemId = resolveQuickTargetItemId(row.actionLabel);
   if(!before) await saveConfig();
 
-  currentMonthData.expenses[itemId] = Number(currentMonthData.expenses[itemId]||0) + row.amount;
-  // 세부 항목(입력중복 포함)으로 분류된 만큼, 카드 총액("카드값")에서도 함께 차감해서 이중 계산 방지
-  if(cardValueItemId && itemId !== cardValueItemId){
-    currentMonthData.expenses[cardValueItemId] = Math.max(0, Number(currentMonthData.expenses[cardValueItemId]||0) - row.amount);
-  }
-
   const isDup = row.actionLabel === '중복';
+  // "입력중복"은 이미 "카드값"에 포함된 금액이므로 세부 항목(생활비 등)에는 더하지 않고 카드값에서만 차감한다.
+  applyTxToExpenses(itemId, row.amount, isDup, cardValueItemId);
+
   const tx = { id: genId('tx'), date: row.date||'', merchant: row.merchant, amount: row.amount, itemId, isDuplicate: isDup, cardBrand: selectedCardBrand||null };
   currentMonthData.cardTransactions.push(tx);
   row.txId = tx.id;
@@ -1741,24 +1796,15 @@ async function applyReclassifyToTx(tx, newLabel){
   const cardValueItemId = findCardValueItemId();
 
   // 기존 효과 되돌리기
-  // 구버전 호환: 예전엔 입력중복 거래의 itemId가 "카드값" 자신을 직접 가리켰음 (지금은 별도 "입력중복" 항목을 가리킴)
-  if(tx.isDuplicate && tx.itemId === cardValueItemId){
-    if(tx.itemId) currentMonthData.expenses[tx.itemId] = Number(currentMonthData.expenses[tx.itemId]||0) + tx.amount;
-  } else {
-    currentMonthData.expenses[tx.itemId] = Math.max(0, Number(currentMonthData.expenses[tx.itemId]||0) - tx.amount);
-    if(cardValueItemId && tx.itemId !== cardValueItemId){
-      currentMonthData.expenses[cardValueItemId] = Number(currentMonthData.expenses[cardValueItemId]||0) + tx.amount;
-    }
-  }
+  revertTxFromExpenses(tx, cardValueItemId);
 
-  // 새 분류 적용 (입력중복 포함, 전부 동일한 방식: 대상 항목에 더하고 카드값에서 차감)
+  // 새 분류 적용. "입력중복"이면 세부 항목에는 더하지 않고 카드값에서만 차감한다.
   const newItemId = resolveQuickTargetItemId(newLabel);
-  currentMonthData.expenses[newItemId] = Number(currentMonthData.expenses[newItemId]||0) + tx.amount;
-  if(cardValueItemId && newItemId !== cardValueItemId){
-    currentMonthData.expenses[cardValueItemId] = Math.max(0, Number(currentMonthData.expenses[cardValueItemId]||0) - tx.amount);
-  }
+  const isNewDup = (newLabel === '중복');
+  applyTxToExpenses(newItemId, tx.amount, isNewDup, cardValueItemId);
+
   tx.itemId = newItemId;
-  tx.isDuplicate = (newLabel === '중복');
+  tx.isDuplicate = isNewDup;
   return true;
 }
 
@@ -1817,15 +1863,7 @@ function removeCardTransactionSilently(txId){
   if(idx === -1) return;
   const tx = list[idx];
   const cardValueItemId = findCardValueItemId();
-  // 구버전 호환: 예전엔 입력중복 거래의 itemId가 "카드값" 자신을 직접 가리켰음
-  if(tx.isDuplicate && tx.itemId === cardValueItemId){
-    if(tx.itemId) currentMonthData.expenses[tx.itemId] = Number(currentMonthData.expenses[tx.itemId]||0) + tx.amount;
-  } else {
-    currentMonthData.expenses[tx.itemId] = Math.max(0, Number(currentMonthData.expenses[tx.itemId]||0) - tx.amount);
-    if(cardValueItemId && tx.itemId !== cardValueItemId){
-      currentMonthData.expenses[cardValueItemId] = Number(currentMonthData.expenses[cardValueItemId]||0) + tx.amount;
-    }
-  }
+  revertTxFromExpenses(tx, cardValueItemId);
   list.splice(idx,1);
   saveMonth(currentMonthKey);
   renderCategoryEditor();
@@ -1841,16 +1879,7 @@ async function undoAllCardTransactions(){
   if(!confirm(`${currentMonthKey}에 ${scopeLabel} 반영된 카드 내역 ${list.length}건을 모두 되돌리시겠습니까? 각 항목에 더해졌던 금액이 전부 원상복구됩니다.`)) return;
   const cardValueItemId = findCardValueItemId();
   const listSet = new Set(list);
-  list.forEach(tx=>{
-    if(tx.isDuplicate && tx.itemId === cardValueItemId){
-      if(tx.itemId) currentMonthData.expenses[tx.itemId] = Number(currentMonthData.expenses[tx.itemId]||0) + tx.amount;
-    } else {
-      currentMonthData.expenses[tx.itemId] = Math.max(0, Number(currentMonthData.expenses[tx.itemId]||0) - tx.amount);
-      if(cardValueItemId && tx.itemId !== cardValueItemId){
-        currentMonthData.expenses[cardValueItemId] = Number(currentMonthData.expenses[cardValueItemId]||0) + tx.amount;
-      }
-    }
-  });
+  list.forEach(tx=> revertTxFromExpenses(tx, cardValueItemId));
   currentMonthData.cardTransactions = allList.filter(tx => !listSet.has(tx));
   await saveMonth(currentMonthKey);
   renderCategoryEditor();
@@ -2227,10 +2256,10 @@ async function removeIgnoredMerchant(idx){
 /* ---------------- 탭 전환 ---------------- */
 function switchTab(name){
   document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active', t.dataset.tab===name));
-  ['monthly','income','card','stats','annual','settings'].forEach(t=>{
+  ['monthly','card','stats','annual','settings'].forEach(t=>{
     document.getElementById('tab-'+t).style.display = (t===name)?'block':'none';
   });
-  document.getElementById('monthSelectorRow').style.display = (name==='monthly'||name==='income'||name==='stats')?'flex':'none';
+  document.getElementById('monthSelectorRow').style.display = (name==='monthly'||name==='annual'||name==='stats')?'flex':'none';
   if(name==='stats') renderStats();
 }
 document.querySelectorAll('.tab').forEach(t=>{
