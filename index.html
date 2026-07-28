@@ -73,14 +73,11 @@
   #tab-stats .cards{margin-bottom:8px;}
   #tab-stats .panel{padding:10px 12px;margin-bottom:10px;}
   #tab-stats .panel h2{font-size:12.5px;margin:0 0 6px;}
-  .stats-top-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px;margin-bottom:8px;}
-  .stats-grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:10px;}
-  @media (max-width:1100px){.stats-grid4{grid-template-columns:1fr 1fr;}}
-  @media (max-width:600px){.stats-grid4{grid-template-columns:1fr;}}
-  .stats-grid4 .panel{display:flex;flex-direction:column;margin-bottom:0;}
-  .stats-scroll-table{overflow-y:auto;max-height:150px;}
-  .stats-scroll-table table{font-size:11.5px;}
-  .stats-scroll-table th,.stats-scroll-table td{padding:4px 5px;}
+  .stats-top-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-bottom:8px;}
+  .stats-top-cards .card{cursor:pointer;transition:box-shadow .15s;}
+  .stats-top-cards .card:hover{box-shadow:0 3px 10px rgba(20,22,31,.1);}
+  .stats-grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px;}
+  @media (max-width:800px){.stats-grid2{grid-template-columns:1fr;}}
 
   .panel-header-toggle{display:flex;justify-content:space-between;align-items:center;cursor:pointer;user-select:none;}
   .income-total-badge{font-size:11px;color:var(--income);font-weight:700;margin-left:6px;}
@@ -171,11 +168,11 @@
   </div>
 
   <div class="tabs">
-    <div class="tab active" data-tab="monthly">월별 입력</div>
-    <div class="tab" data-tab="card">카드 명세서 자동분류</div>
+    <div class="tab active" data-tab="monthly">월별내역</div>
+    <div class="tab" data-tab="card">카드내역</div>
     <div class="tab" data-tab="stats">통계/분석</div>
-    <div class="tab" data-tab="annual">연간 고정비</div>
-    <div class="tab" data-tab="settings">카테고리 설정</div>
+    <div class="tab" data-tab="annual">고정비</div>
+    <div class="tab" data-tab="settings">분류설정</div>
   </div>
 
   <div class="top-row" id="monthSelectorRow">
@@ -249,40 +246,23 @@
 
   <!-- ===== STATS TAB ===== -->
   <div id="tab-stats" style="display:none;">
-    <div class="stats-top-cards">
-      <div id="statsSummaryCards" style="display:contents;"></div>
-      <div id="momCompareCards" style="display:contents;"></div>
-    </div>
+    <div class="stats-top-cards" id="statsSummaryCards"></div>
+    <div id="statsDetailPanel" class="panel" style="display:none;"></div>
 
-    <div class="panel">
-      <h2 id="trendChartTitle">총 지출 추이</h2>
-      <canvas id="trendChart" height="45"></canvas>
-    </div>
-
-    <div class="stats-grid4">
+    <div class="stats-grid2">
+      <div class="panel">
+        <h2 id="trendChartTitle">총 지출 추이</h2>
+        <canvas id="trendChart" height="120"></canvas>
+      </div>
       <div class="panel">
         <h2 id="donutTitle">이번 달 카테고리 비중</h2>
-        <canvas id="donutChart" height="150"></canvas>
-      </div>
-      <div class="panel">
-        <h2 id="personChartTitle">이번 달 담당자별 지출 비중</h2>
-        <canvas id="personChart" height="150"></canvas>
-      </div>
-      <div class="panel">
-        <h2 id="lifeDonutTitle">이번 달 생활비 세부 비중</h2>
-        <canvas id="lifeDonutChart" height="150"></canvas>
-      </div>
-      <div class="panel">
-        <h2 id="lifeDetailTitle">생활비 세부 내역</h2>
-        <div class="stats-scroll-table">
-          <table><thead><tr><th>세부 항목</th><th>금액</th><th>비중</th></tr></thead><tbody id="lifeDetailBody"></tbody></table>
-        </div>
+        <canvas id="donutChart" height="120"></canvas>
       </div>
     </div>
 
     <div class="panel">
-      <h2 id="lifeTrendTitle">생활비 추이</h2>
-      <canvas id="lifeTrendChart" height="45"></canvas>
+      <h2 id="lifeTrendTitle">생활비 세부 추이</h2>
+      <canvas id="lifeTrendChart" height="90"></canvas>
     </div>
   </div>
 
@@ -1890,24 +1870,10 @@ async function undoAllCardTransactions(){
 /* ---------------- 통계 ---------------- */
 let trendChartInstance = null;
 let donutChartInstance = null;
-let personChartInstance = null;
-let lifeDonutChartInstance = null;
 let lifeTrendChartInstance = null;
 
-// 추이 차트(총 지출 추이, 생활비 추이)의 시작월. 그 이전 달은 테스트/기본값만 있어 의미가 없어 제외.
-const STATS_START_MONTH = '2026-06';
-
-function personTotals(monthData){
-  const totals = {};
-  PERSON_OPTIONS.forEach(p=> totals[p]=0);
-  categories.forEach(cat=>{
-    cat.items.forEach(it=>{
-      const amt = cat.fixed ? Number(it.amount||0) : Number((monthData.expenses||{})[it.id]||0);
-      totals[it.person] = (totals[it.person]||0) + amt;
-    });
-  });
-  return totals;
-}
+// 추이 차트(총 지출 추이, 생활비 세부 추이)의 시작월.
+const STATS_START_MONTH = '2026-07';
 
 async function loadAllMonthsForStats(){
   const now = new Date();
@@ -1955,39 +1921,40 @@ async function renderStats(){
   const expenseData = keys.map(k=> monthTotalExpense(results[k]));
   const startLabel = STATS_START_MONTH;
 
-  // 상단 요약 카드: 이번 달 총지출/생활비/생활비 비중
+  // 상단 요약 카드: 총지출(전월비 증감 포함) + 월별입력의 4개 카테고리 금액. 클릭하면 상세 내역 표시.
   const summaryWrap = document.getElementById('statsSummaryCards');
   const totalExpNow = monthTotalExpense(currentMonthData);
-  const lifeCat = categories.find(c=>c.name==='생활비');
-  const lifeTotal = lifeCat ? categoryTotal(lifeCat, currentMonthData) : 0;
-  const lifeShare = totalExpNow ? ((lifeTotal/totalExpNow)*100).toFixed(1) : 0;
+  const idxCur = keys.indexOf(currentMonthKey);
+  let momHtml = `<div class="delta">비교할 이전 달 데이터가 없습니다</div>`;
+  if(idxCur > 0){
+    const diff = expenseData[idxCur] - expenseData[idxCur-1];
+    const pct = expenseData[idxCur-1] ? ((diff/expenseData[idxCur-1])*100).toFixed(1) : 0;
+    momHtml = `<div class="delta" style="color:${diff>=0?'var(--expense)':'var(--income)'};font-weight:700;">
+      ${diff>=0?'▲':'▼'} ${fmt(Math.abs(diff))} (${Math.abs(pct)}%) 전월(${keys[idxCur-1]})比
+    </div>`;
+  }
   if(summaryWrap){
+    const catCardsHtml = categories.map((cat,ci)=>{
+      const amt = categoryTotal(cat, currentMonthData);
+      const color = CATEGORY_PALETTE[ci % CATEGORY_PALETTE.length].head;
+      return `<div class="card" onclick="showStatsDetail('${cat.name}')">
+        <div class="label">${currentMonthKey} ${cat.name}</div>
+        <div class="value" style="color:${color};">${fmt(amt)}</div>
+      </div>`;
+    }).join('');
     summaryWrap.innerHTML = `
-      <div class="card"><div class="label">${currentMonthKey} 총지출</div><div class="value expense">${fmt(totalExpNow)}</div></div>
-      <div class="card"><div class="label">${currentMonthKey} 생활비 합계</div><div class="value" style="color:#6b3fa0;">${fmt(lifeTotal)}</div></div>
-      <div class="card"><div class="label">총지출 대비 생활비 비중</div><div class="value">${lifeShare}%</div></div>
+      <div class="card" onclick="showStatsDetail('__total__')">
+        <div class="label">${currentMonthKey} 총지출</div>
+        <div class="value expense">${fmt(totalExpNow)}</div>
+        ${momHtml}
+      </div>
+      ${catCardsHtml}
     `;
   }
-
-  // 전월 대비 증감 (상단으로 이동, 간단한 카드 형태)
-  const idxCur = keys.indexOf(currentMonthKey);
-  const momWrap = document.getElementById('momCompareCards');
-  if(momWrap){
-    if(idxCur > 0){
-      const prevExp = expenseData[idxCur-1];
-      const curExpTotal = expenseData[idxCur];
-      const diff = curExpTotal - prevExp;
-      const pct = prevExp ? ((diff/prevExp)*100).toFixed(1) : 0;
-      momWrap.innerHTML = `
-        <div class="card">
-          <div class="label">전월(${keys[idxCur-1]}) 대비 증감</div>
-          <div class="value" style="color:${diff>=0?'var(--expense)':'var(--income)'};font-size:15px;">
-            ${diff>=0?'▲':'▼'} ${fmt(Math.abs(diff))} (${Math.abs(pct)}%)
-          </div>
-        </div>`;
-    } else {
-      momWrap.innerHTML = `<div class="card"><div class="label">전월 대비 증감</div><div class="delta">비교할 이전 달 데이터가 없습니다</div></div>`;
-    }
+  // 탭 전환/월 변경 후에도 열려있던 상세 패널이 있으면 최신 내용으로 갱신
+  const openDetail = document.getElementById('statsDetailPanel');
+  if(openDetail && openDetail.style.display !== 'none' && openDetail.dataset.kind){
+    showStatsDetail(openDetail.dataset.kind, true);
   }
 
   document.getElementById('trendChartTitle').textContent = `${startLabel} 이후 총 지출 추이`;
@@ -2018,67 +1985,67 @@ async function renderStats(){
     }
   });
 
-  const pTotals = personTotals(currentMonthData);
-  document.getElementById('personChartTitle').textContent = `${currentMonthKey} 담당자별 지출 비중`;
-  const ctx3 = document.getElementById('personChart').getContext('2d');
-  if(personChartInstance) personChartInstance.destroy();
-  personChartInstance = new Chart(ctx3, {
-    type:'doughnut',
-    data:{ labels: Object.keys(pTotals), datasets:[{ data: Object.values(pTotals),
-      backgroundColor:['#2f5fa8','#e0453c','#1f9d8a','#8a63c9','#d9a24f'] }]},
-    options:{ responsive:true, plugins:{legend:{position:'bottom'}, datalabels:{display:false}} }
-  });
-
-  // 생활비 세부 항목 비중 (가로 막대 + 금액/% 라벨) + 표
+  // 생활비 세부 추이 — 항목별 월별 추이 + 생활비 총계를 한 그래프에서 함께 표시 (STATS_START_MONTH 이후)
   const lifeCatForDetail = categories.find(c=>c.name==='생활비');
-  const lifeItemTotals = {};
-  if(lifeCatForDetail){
-    lifeCatForDetail.items.forEach(it=>{
-      lifeItemTotals[it.name] = Number((currentMonthData.expenses||{})[it.id]||0);
+  const itemColors = ['#8a5a34','#2f5fa8','#1f9d8a','#c9506a','#a68d2c','#4a5f85','#6b3fa0','#d9a24f','#1f7a45','#b3392c','#116b5e'];
+  const itemNames = lifeCatForDetail ? lifeCatForDetail.items.map(it=>it.name) : [];
+  const itemIds = lifeCatForDetail ? lifeCatForDetail.items.map(it=>it.id) : [];
+  const itemTrendData = itemNames.map(()=>[]);
+  const lifeTotalTrend = [];
+  keys.forEach(k=>{
+    const monthData = results[k];
+    let sum = 0;
+    itemIds.forEach((id, ii)=>{
+      const amt = Number((monthData.expenses||{})[id]||0);
+      itemTrendData[ii].push(amt);
+      sum += amt;
     });
-  }
-  const lifeGrandTotal = Object.values(lifeItemTotals).reduce((a,b)=>a+b,0);
-  document.getElementById('lifeDonutTitle').textContent = `${currentMonthKey} 생활비 세부 비중`;
-  const ctx4 = document.getElementById('lifeDonutChart').getContext('2d');
-  if(lifeDonutChartInstance) lifeDonutChartInstance.destroy();
-  const lifeSortedEntries = Object.entries(lifeItemTotals).sort((a,b)=>b[1]-a[1]);
-  lifeDonutChartInstance = new Chart(ctx4, {
-    type:'bar',
-    data:{ labels: lifeSortedEntries.map(e=>e[0]), datasets:[{ data: lifeSortedEntries.map(e=>e[1]),
-      backgroundColor:['#8a5a34','#2f5fa8','#1f9d8a','#c9506a','#a68d2c','#4a5f85','#6b3fa0','#d9a24f','#1f7a45','#b3392c','#116b5e'] }]},
-    options:{
-      indexAxis:'y', responsive:true,
-      plugins:{ legend:{display:false}, datalabels: barDatalabelsConfig(lifeGrandTotal) },
-      scales:{ x:{ ticks:{ callback:(v)=>fmtPlain(v) } } }
-    }
+    lifeTotalTrend.push(sum);
   });
-
-  document.getElementById('lifeDetailTitle').textContent = `${currentMonthKey} 생활비 세부 내역 (합계 ${fmt(lifeGrandTotal)})`;
-  const lifeDetailBody = document.getElementById('lifeDetailBody');
-  if(lifeDetailBody){
-    lifeDetailBody.innerHTML = lifeSortedEntries.length
-      ? lifeSortedEntries.map(([name,amt])=>{
-          const pct = lifeGrandTotal ? ((amt/lifeGrandTotal)*100).toFixed(1) : 0;
-          return `<tr><td>${name}</td><td>${fmt(amt)}</td><td>${pct}%</td></tr>`;
-        }).join('')
-      : '<tr><td colspan="3" class="empty">생활비 항목이 없습니다</td></tr>';
-  }
-
-  // 생활비 추이 (STATS_START_MONTH 이후)
-  document.getElementById('lifeTrendTitle').textContent = `${startLabel} 이후 생활비 추이`;
-  const lifeTrendData = keys.map(k=>{
-    const cat = categories.find(c=>c.name==='생활비');
-    return cat ? categoryTotal(cat, results[k]) : 0;
-  });
-  const ctx5 = document.getElementById('lifeTrendChart').getContext('2d');
+  document.getElementById('lifeTrendTitle').textContent = `${startLabel} 이후 생활비 세부 추이`;
+  const ctx3 = document.getElementById('lifeTrendChart').getContext('2d');
   if(lifeTrendChartInstance) lifeTrendChartInstance.destroy();
-  lifeTrendChartInstance = new Chart(ctx5, {
-    type:'line',
-    data:{ labels: keys, datasets:[
-      {label:'생활비', data: lifeTrendData, borderColor:'#6b3fa0', backgroundColor:'#6b3fa022', tension:.3, fill:true}
-    ]},
-    options:{ responsive:true, plugins:{legend:{position:'bottom'}, datalabels:{display:false}} }
+  const lifeDatasets = [
+    {label:'생활비 합계', data: lifeTotalTrend, borderColor:'#26241f', backgroundColor:'#26241f11', borderWidth:3, borderDash:[], tension:.3, fill:false, pointRadius:3}
+  ];
+  itemNames.forEach((name,ii)=>{
+    lifeDatasets.push({ label:name, data: itemTrendData[ii], borderColor: itemColors[ii % itemColors.length], borderWidth:1.5, tension:.3, fill:false, pointRadius:2 });
   });
+  lifeTrendChartInstance = new Chart(ctx3, {
+    type:'line',
+    data:{ labels: keys, datasets: lifeDatasets },
+    options:{ responsive:true, plugins:{legend:{position:'bottom', labels:{boxWidth:10, font:{size:10}}}, datalabels:{display:false}} }
+  });
+}
+
+// 통계 탭 상단 카드를 클릭했을 때 상세 내역(카테고리별 또는 그 카테고리의 세부 항목별)을 펼쳐 보여줌
+function showStatsDetail(kind, forceRefresh){
+  const el = document.getElementById('statsDetailPanel');
+  if(!el) return;
+  if(!forceRefresh && el.style.display !== 'none' && el.dataset.kind === kind){
+    el.style.display = 'none';
+    return;
+  }
+  el.style.display = 'block';
+  el.dataset.kind = kind;
+
+  if(kind === '__total__'){
+    const rows = categories.map(cat=>{
+      const amt = categoryTotal(cat, currentMonthData);
+      return `<tr><td>${cat.name} ${cat.fixed ? '<span class="fixed-tag">고정비</span>' : ''}</td><td>${fmt(amt)}</td></tr>`;
+    }).join('');
+    el.innerHTML = `<h2>${currentMonthKey} 총지출 내역 (카테고리별)</h2>
+      <table><thead><tr><th>카테고리</th><th>금액</th></tr></thead><tbody>${rows}</tbody></table>`;
+    return;
+  }
+  const cat = categories.find(c=>c.name===kind);
+  if(!cat){ el.style.display='none'; return; }
+  const rows = cat.items.map(it=>{
+    const amt = cat.fixed ? Number(it.amount||0) : Number((currentMonthData.expenses||{})[it.id]||0);
+    return `<tr><td>${it.name}</td><td>${it.person}</td><td>${fmt(amt)}</td></tr>`;
+  }).join('');
+  el.innerHTML = `<h2>${currentMonthKey} ${cat.name} 세부 내역</h2>
+    <table><thead><tr><th>항목</th><th>담당</th><th>금액</th></tr></thead><tbody>${rows || '<tr><td colspan="3" class="empty">항목이 없습니다</td></tr>'}</tbody></table>`;
 }
 
 /* ---------------- 연간 고정비 ---------------- */
