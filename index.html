@@ -1464,6 +1464,10 @@ function renderCardQuickSummary(){
   const classifiedGrandTotal = labelsForSummary.reduce((s,l)=>s+totals[l].amount,0);
   const pastedGrandTotal = parsedRows.reduce((s,r)=>s+r.amount,0);
   const diff = pastedGrandTotal - classifiedGrandTotal;
+  // 실제로 "월별 입력"의 각 사용처 카테고리(생활비/외식비/의료비/의류비/교통비/여가비)에 금액으로 더해지는 총계.
+  // parsedRows는 "행 삭제"된 건은 이미 배열에서 빠져 있으므로 별도 처리가 필요 없고,
+  // "입력중복"으로 분류된 건은 카테고리에는 더해지지만 "카드값"에서 그만큼 차감되어 순증가가 없으므로 여기서 제외한다.
+  const monthlyEntryTotal = classifiedGrandTotal - (totals['중복'] ? totals['중복'].amount : 0);
   const checkWrap = document.getElementById('cardTotalCheck');
   if(checkWrap){
     const activeStyle = (v)=> cardLabelFilter===v ? 'border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-light);' : '';
@@ -1475,6 +1479,11 @@ function renderCardQuickSummary(){
       <div class="card" style="cursor:pointer;${activeStyle('__all__')}" onclick="toggleCardLabelFilter('__all__')">
         <div class="label">붙여넣은 전체 금액</div><div class="value">${fmt(pastedGrandTotal)}</div>
         <div class="delta">클릭해서 전체 보기</div>
+      </div>
+      <div class="card">
+        <div class="label">월별 입력 반영 총액</div>
+        <div class="value" style="color:var(--accent);">${fmt(monthlyEntryTotal)}</div>
+        <div class="delta">삭제·입력중복 제외</div>
       </div>
       <div class="card" style="cursor:pointer;${activeStyle('__unclassified__')}" onclick="toggleCardLabelFilter('__unclassified__')">
         <div class="label">${diff===0?'✔ 누락 없음':'⚠ 미분류/누락 금액'}</div>
