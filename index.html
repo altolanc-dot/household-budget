@@ -328,6 +328,15 @@
       <p class="status">카드 명세서에서 가맹점명에 아래 키워드가 포함되면 자동으로 해당 항목으로 분류됩니다.</p>
       <table><thead><tr><th>키워드</th><th>분류</th><th></th></tr></thead><tbody id="ruleTableBody"></tbody></table>
     </div>
+    <div class="panel">
+      <h2>자동 제외 가맹점 목록</h2>
+      <p class="status">"총 147건" 같은 안내문구나 거래가 아닌 줄을 삭제하면서 "앞으로도 제외"를 선택하면 여기 저장됩니다. 매달 카드 명세서를 분석할 때 자동으로 걸러집니다.</p>
+      <div class="row-flex" style="margin-bottom:10px;">
+        <input type="text" id="newIgnoredMerchant" placeholder="제외할 가맹점명 직접 추가" style="width:220px;">
+        <button onclick="addIgnoredMerchant()">추가</button>
+      </div>
+      <table><thead><tr><th>가맹점명</th><th></th></tr></thead><tbody id="ignoredMerchantTableBody"></tbody></table>
+    </div>
   </div>
 
 </div>
@@ -527,12 +536,24 @@ async function init(){
   await loadAnnual();
   renderSettingsEditor();
   renderRuleTable();
+  renderIgnoredMerchantTable();
   renderCardBrandButtons();
   switchTab('monthly');
 }
 
 // 카드 선택 버튼 처리 — 브랜드는 기록용 라벨일 뿐, 차감 대상은 항상 통합된 "카드값" 항목 하나
 let cardBrandList = ["우리","현대"];
+let ignoredMerchants = []; // 사용자가 "앞으로도 제외"로 지정한 가맹점명 목록 (매달 파싱 시 자동 제외)
+
+function isIgnoredMerchant(merchant){
+  return ignoredMerchants.some(m => merchant.includes(m));
+}
+
+async function saveIgnoredMerchants(){
+  if(!firebaseReady) return;
+  try{ await db.collection('config').doc('ignoredMerchants').set({ list: ignoredMerchants }); }
+  catch(e){ console.error(e); }
+}
 
 function renderCardBrandButtons(){
   const wrap = document.getElementById('cardBrandButtons');
@@ -829,6 +850,11 @@ async function loadConfig(){
       cardBrandList = loadedBrands;
     } else {
       await db.collection('config').doc('cardBrands').set({ list: cardBrandList });
+    }
+
+    const ignoreSnap = await db.collection('config').doc('ignoredMerchants').get();
+    if(ignoreSnap.exists && Array.isArray(ignoreSnap.data().list)){
+      ignoredMerchants = ignoreSnap.data().list;
     }
   }catch(e){ console.error('설정 로드 실패', e); }
 }
@@ -1295,7 +1321,9 @@ async function parseCardStatement(isReload){
       const amount = Number(amountRaw)||0;
       const date = csvParts[0];
       const merchant = csvParts.slice(1,-1).join(' ');
-      if(merchant && amount) parsedRows.push({date, merchant, amount, actionLabel: matchMerchant(merchant)});
+      if(merchant && amount && !/^총\s*\d+\s*건/.test(merchant) && !isIgnoredMerchant(merchant)){
+        parsedRows.push({date, merchant, amount, actionLabel: matchMerchant(merchant)});
+      }
     });
     linkExistingCommits();
     if(!isReload) await saveCurrentCardPdfText(raw);
@@ -1348,6 +1376,10 @@ async function parseCardStatement(isReload){
 
     // 가맹점명이 비어있거나 숫자/기호만 남은 잡음 줄은 제외
     if(!merchant || /^[\d\s.\-:]+$/.test(merchant)) continue;
+    // "총 147건", "총 3건" 같은 합계/요약 문구 줄은 실제 거래가 아니므로 제외
+    if(/^총\s*\d+\s*건/.test(merchant)) continue;
+    // 사용자가 영구 제외로 지정한 가맹점명도 건너뜀
+    if(isIgnoredMerchant(merchant)) continue;
     parsedRows.push({date, merchant, amount, actionLabel: matchMerchant(merchant)});
   }
   linkExistingCommits();
@@ -1564,7 +1596,7 @@ function renderCardResults(){
 
 // 분류 결과에서 필요없는 줄(안내문구, 중복 노이즈 등)을 완전히 삭제.
 // 이미 반영된 행이면 반영 효과도 함께 되돌린다.
-function removeParsedRow(idx){
+async function removeParsedRow(idx){
   const row = parsedRows[idx];
   if(!row) return;
   if(!confirm(`"${row.merchant}" (${fmt(row.amount)}) 행을 삭제하시겠습니까?`)) return;
@@ -1573,6 +1605,18 @@ function removeParsedRow(idx){
   }
   parsedRows.splice(idx,1);
   renderCardResults();
+
+  if(!isIgnoredMerchant(row.merchant) && confirm(`"${row.merchant}"은(는) 앞으로도 계속 자동으로 제외할까요? (예: 안내문구, 광고성 문자 등 거래가 아닌 경우)`)){
+    ignoredMerchants.push(row.merchant);
+    await saveIgnoredMerchants();
+    // 이번에 불러온 화면에서 같은 가맹점명 다른 행들도 함께 제거
+    parsedRows = parsedRows.filter(r=>{
+      if(r.merchant !== row.merchant) return true;
+      if(r.txId) removeCardTransactionSilently(r.txId);
+      return false;
+    });
+    renderCardResults();
+  }
 }
 
 async function setRowQuickAction(idx, label){
@@ -2145,6 +2189,30 @@ function removeRule(keyword){
   delete merchantRules[keyword];
   saveRules();
   renderRuleTable();
+}
+
+function renderIgnoredMerchantTable(){
+  const tbody = document.getElementById('ignoredMerchantTableBody');
+  if(!tbody) return;
+  if(ignoredMerchants.length===0){ tbody.innerHTML = '<tr><td colspan="2" class="empty">등록된 제외 가맹점이 없습니다</td></tr>'; return; }
+  tbody.innerHTML = ignoredMerchants.map((m,idx)=>
+    `<tr><td>${m}</td><td><span class="del-x" onclick="removeIgnoredMerchant(${idx})">✕</span></td></tr>`
+  ).join('');
+}
+async function addIgnoredMerchant(){
+  const input = document.getElementById('newIgnoredMerchant');
+  const name = input.value.trim();
+  if(!name) return;
+  if(ignoredMerchants.includes(name)){ alert('이미 등록되어 있습니다.'); return; }
+  ignoredMerchants.push(name);
+  await saveIgnoredMerchants();
+  input.value = '';
+  renderIgnoredMerchantTable();
+}
+async function removeIgnoredMerchant(idx){
+  ignoredMerchants.splice(idx,1);
+  await saveIgnoredMerchants();
+  renderIgnoredMerchantTable();
 }
 
 /* ---------------- 탭 전환 ---------------- */
