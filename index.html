@@ -1420,7 +1420,7 @@ async function parseCardStatement(isReload){
   // "년/월/일" 날짜 표기 + "본인/가족" 구분 + 카드상품명이 가맹점명 앞에 붙는 게 특징이라 전용 패턴으로 처리한다.
   // "이용금액" 바로 뒤에는 항상 "할인율%"이 오는데, 이 지점만은 PDF 추출 과정에서도 공백이 유지돼서
   // 뒤쪽 결제원금/결제후잔액 칸이 서로 붙어버리는(예: "17,5000") 경우에도 안정적으로 금액을 뽑아낼 수 있다.
-  const HD_LINE_RE = /(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일\s*(?:본인|가족)\s+(.+?)\s+([\d,]+)\s+[\d.]+%/;
+  const HD_LINE_RE = /(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일\s*(?:본인|가족)\s+(.+?)\s+(-?[\d,]+)\s+[\d.]+%/;
   const CARD_PRODUCT_PREFIX_RE = /^(Hyundai\s*Mobility\s*P|현대카드\s*M\s*\(구\)\s*하이패스?)\s*/i;
   const hdLikeCount = rawLines.filter(l=>HD_LINE_RE.test(l)).length;
   if(rawLines.length>0 && hdLikeCount / rawLines.length >= 0.2){
