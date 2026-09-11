@@ -585,27 +585,41 @@ function addCardBrand(){
   renderCardBrandButtons();
 }
 
+// 현재 선택된 달(currentMonthData) + 현재 선택된 카드(selectedCardBrand) 기준으로
+// 붙여넣기 텍스트창/분류 결과 표/검색·필터 상태를 전부 새로고침한다.
+// 카드를 바꿀 때(selectCardBrand)뿐 아니라 조회 월을 바꿀 때(loadMonth)도 반드시 이 함수를 거쳐야,
+// "월은 바뀌었는데 화면엔 이전 달 분석 내용이 그대로 남아있는" 문제가 생기지 않는다.
+async function refreshCardPasteForCurrentSelection(){
+  parsedRows = [];
+  cardBatchCommitted = false;
+  showAllCardRows = true;
+  cardLabelFilter = null;
+  cardMerchantSearch = '';
+  const searchInputEl = document.getElementById('cardMerchantSearchInput');
+  if(searchInputEl) searchInputEl.value = '';
+  const pasteEl = document.getElementById('cardPaste');
+  const pdfStatusEl = document.getElementById('pdfStatus');
+  if(!selectedCardBrand){
+    if(pasteEl) pasteEl.value = '';
+    if(pdfStatusEl) pdfStatusEl.textContent = '';
+    renderCardResults();
+    return;
+  }
+  const savedText = (currentMonthData.cardPdfText||{})[selectedCardBrand] || '';
+  if(pasteEl) pasteEl.value = savedText;
+  if(pdfStatusEl) pdfStatusEl.textContent = savedText ? `${currentMonthKey} · "${selectedCardBrand}카드"에 저장된 내용을 불러왔습니다.` : '';
+  if(savedText){
+    await parseCardStatement(true); // true: 저장은 다시 하지 않고 기존 반영 내역과 연결만
+  } else {
+    renderCardResults();
+  }
+}
+
 async function selectCardBrand(brand){
   // 다른 카드로 전환 → 이 카드에 저장된 내용이 있으면 불러와서 다시 분석(이미 반영된 건 재반영 안 됨),
   // 저장된 내용이 없으면 깨끗하게 비움 (이전 카드 내용이 남아있지 않도록)
-  if(brand !== selectedCardBrand){
-    selectedCardBrand = brand;
-    parsedRows = [];
-    cardBatchCommitted = false;
-    showAllCardRows = true;
-    const pasteEl = document.getElementById('cardPaste');
-    const pdfStatusEl = document.getElementById('pdfStatus');
-    const savedText = (currentMonthData.cardPdfText||{})[brand] || '';
-    if(pasteEl) pasteEl.value = savedText;
-    if(pdfStatusEl) pdfStatusEl.textContent = savedText ? '이 카드에 저장된 내용을 불러왔습니다.' : '';
-    if(savedText){
-      await parseCardStatement(true); // true: 저장은 다시 하지 않고 기존 반영 내역과 연결만
-    } else {
-      renderCardResults();
-    }
-  } else {
-    selectedCardBrand = brand;
-  }
+  selectedCardBrand = brand;
+  await refreshCardPasteForCurrentSelection();
   renderCardBrandButtons();
   renderCardHistory();
   const itemId = findCardValueItemId();
@@ -902,6 +916,7 @@ async function loadMonth(key){
   renderIncomeTable();
   renderCardHistory();
   renderCardBrandButtons();
+  await refreshCardPasteForCurrentSelection();
   if(repaired || migratedDup) saveMonth(key);
 }
 
