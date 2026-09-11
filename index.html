@@ -1397,6 +1397,33 @@ async function parseCardStatement(isReload){
     return;
   }
 
+  // "이용일 이용카드 이용가맹점 이용금액 할부/회차 적립/할인율(%) 예상적립/할인 결제원금 결제후잔액" 형식(예: 현대카드 이용대금명세서).
+  // "년/월/일" 날짜 표기 + "본인/가족" 구분 + 카드상품명이 가맹점명 앞에 붙는 게 특징이라 전용 패턴으로 처리한다.
+  // "이용금액" 바로 뒤에는 항상 "할인율%"이 오는데, 이 지점만은 PDF 추출 과정에서도 공백이 유지돼서
+  // 뒤쪽 결제원금/결제후잔액 칸이 서로 붙어버리는(예: "17,5000") 경우에도 안정적으로 금액을 뽑아낼 수 있다.
+  const HD_LINE_RE = /(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일\s*(?:본인|가족)\s+(.+?)\s+([\d,]+)\s+[\d.]+%/;
+  const CARD_PRODUCT_PREFIX_RE = /^(Hyundai\s*Mobility\s*P|현대카드\s*M\s*\(구\)\s*하이패스?)\s*/i;
+  const hdLikeCount = rawLines.filter(l=>HD_LINE_RE.test(l)).length;
+  if(rawLines.length>0 && hdLikeCount / rawLines.length >= 0.2){
+    rawLines.forEach(line=>{
+      const m = line.match(HD_LINE_RE);
+      if(!m) return;
+      const [, y, mo, d, prefixRaw, amountRaw] = m;
+      const amount = Number(amountRaw.replace(/,/g,'')) || 0;
+      if(!amount) return; // 0원(무료 서비스 안내 등)은 실제 거래가 아니므로 제외
+      let merchant = prefixRaw.trim().replace(CARD_PRODUCT_PREFIX_RE, '').trim();
+      merchant = merchant.replace(/\s*\d{3,4}\s*건\s*$/, '').trim(); // 하이패스 등 "0001건" 같은 통행 횟수 코드 제거
+      if(!merchant || isIgnoredMerchant(merchant)) return;
+      const date = `${y}.${mo.padStart(2,'0')}.${d.padStart(2,'0')}`;
+      parsedRows.push({date, merchant, amount, actionLabel: matchMerchant(merchant)});
+    });
+    linkExistingCommits();
+    if(!isReload) await saveCurrentCardPdfText(raw);
+    await autoCommitPending();
+    renderCardResults();
+    return;
+  }
+
   // PDF에서 추출한 텍스트: "가맹점명 ... 금액" 줄 + 바로 다음 줄(또는 다다음 줄)의
   // "본인/가족 카드명 날짜 시간 결제방식" 에서 날짜만 뽑아 짝지어 처리
   const DATE_RE = /(\d{1,4})\s*[.\/]\s*(\d{1,2})\s*[.\/]\s*(\d{1,2})/;
@@ -2253,7 +2280,7 @@ function switchTab(name){
   ['monthly','card','stats','annual','settings'].forEach(t=>{
     document.getElementById('tab-'+t).style.display = (t===name)?'block':'none';
   });
-  document.getElementById('monthSelectorRow').style.display = (name==='monthly'||name==='annual'||name==='stats')?'flex':'none';
+  document.getElementById('monthSelectorRow').style.display = (name==='monthly'||name==='card'||name==='annual'||name==='stats')?'flex':'none';
   if(name==='stats') renderStats();
 }
 document.querySelectorAll('.tab').forEach(t=>{
