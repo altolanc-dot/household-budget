@@ -1285,10 +1285,14 @@ function embedDatesIntoLines(lines){
   const TIME_RE = /\d{1,2}\s*:\s*\d{2}/;
   const CARD_LINE_RE = /본인|가족|간편결제|카카오페이|네이버페이|삼성페이|페이코|SAMSUNG/i;
   const HEADER_NOISE_RE = /최근\s*이용|이용내역|이용기간|당월|보유\s*카드/; // PDF 상단 안내문구(거래와 무관) 제외
+  // "2026년 08월 31일"처럼 날짜가 이미 줄 안에 그대로 박혀 있는 형식(예: 현대카드 이용대금명세서).
+  // 이런 줄은 거래금액이 "...할인율% ... 결제후잔액 0"처럼 한 자리 숫자로 끝나서 AMOUNT_RE에 안 걸릴 뿐,
+  // 이미 그 자체로 완결된 거래 줄이므로(날짜를 다른 줄에서 찾아 붙일 필요가 없으므로) 버리면 안 된다.
+  const INLINE_DATE_RE = /\d{4}\s*년\s*\d{1,2}\s*월\s*\d{1,2}\s*일/;
   const result = [];
   for(let i=0; i<lines.length; i++){
     const line = lines[i];
-    if(CARD_LINE_RE.test(line) && !AMOUNT_RE.test(line)){
+    if(CARD_LINE_RE.test(line) && !AMOUNT_RE.test(line) && !INLINE_DATE_RE.test(line)){
       // 카드/날짜 정보 줄 자체는 (이미 위에서 흡수됐을 것이므로) 결과에 남기지 않음
       continue;
     }
